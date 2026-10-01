@@ -327,6 +327,20 @@ namespace osu.Framework.Audio
         }
 
         /// <summary>
+        /// (Re-)Initialises the audio engine and the current audio device.
+        /// </summary>
+        public void RestartAudioEngine() => scheduler.AddOnce(restartAudioEngine);
+
+        private void restartAudioEngine()
+        {
+            if (cancelSource.IsCancellationRequested)
+                return;
+
+            syncAudioDevices();
+            initCurrentDevice();
+        }
+
+        /// <summary>
         /// (Re-)Initialises BASS for the current <see cref="AudioDevice"/>.
         /// This will automatically fall back to the system default device on failure.
         /// </summary>
