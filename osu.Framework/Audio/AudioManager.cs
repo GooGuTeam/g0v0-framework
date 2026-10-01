@@ -106,6 +106,7 @@ namespace osu.Framework.Audio
         public readonly BindableBool UseWasapi = new BindableBool();
 
         public readonly BindableBool WasapiIsExclusive = new();
+        public readonly BindableBool WasapiAutoSharedOnBackground = new();
         // BASS accpets a float but let us use double here to avoid fp issues.
         public readonly BindableDouble WasapiBufferSize = new();
         public readonly BindableDouble WasapiPeriod = new();
@@ -196,6 +197,7 @@ namespace osu.Framework.Audio
                 config.BindWith(FrameworkSetting.AudioDevice, AudioDevice);
                 config.BindWith(FrameworkSetting.AudioUseWasapi, UseWasapi);
                 config.BindWith(FrameworkSetting.WasapiIsExclusive, WasapiIsExclusive);
+                config.BindWith(FrameworkSetting.WasapiAutoSharedOnBackground, WasapiAutoSharedOnBackground);
                 config.BindWith(FrameworkSetting.WasapiBufferSize, WasapiBufferSize);
                 config.BindWith(FrameworkSetting.WasapiPeriod, WasapiPeriod);
                 config.BindWith(FrameworkSetting.VolumeUniversal, Volume);
@@ -206,6 +208,12 @@ namespace osu.Framework.Audio
             AudioDevice.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
             UseWasapi.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
             WasapiIsExclusive.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
+            WasapiAutoSharedOnBackground.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
+            thread.IsActive.ValueChanged += _ =>
+            {
+                if (UseWasapi.Value && WasapiIsExclusive.Value && WasapiAutoSharedOnBackground.Value)
+                    scheduler.AddOnce(initCurrentDevice);
+            };
             WasapiBufferSize.MinValue = 0;
             WasapiBufferSize.MaxValue = 0.5;
             WasapiBufferSize.Precision = 1e-3;
@@ -476,7 +484,7 @@ namespace osu.Framework.Audio
 
             bool attemptInit()
             {
-                bool isExclusive = WasapiIsExclusive.Value;
+                bool isExclusive = WasapiIsExclusive.Value && (!WasapiAutoSharedOnBackground.Value || thread.IsActive.Value);
                 bool innerSuccess = thread.InitDevice(device, UseWasapi.Value, isExclusive, WasapiBufferSize.Value, WasapiPeriod.Value);
 
                 if (!innerSuccess)

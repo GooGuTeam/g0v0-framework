@@ -44,6 +44,7 @@ namespace osu.Framework.Configuration
             SetDefault(FrameworkSetting.Renderer, RendererType.Automatic);
             SetDefault(FrameworkSetting.ShowUnicode, false);
             SetDefault(FrameworkSetting.WasapiIsExclusive, false);
+            SetDefault(FrameworkSetting.WasapiAutoSharedOnBackground, true);
             SetDefault(FrameworkSetting.WasapiBufferSize, 0.0);
             SetDefault(FrameworkSetting.WasapiPeriod, 0.0);
             SetDefault(FrameworkSetting.Locale, string.Empty);
@@ -85,6 +86,7 @@ namespace osu.Framework.Configuration
         AudioDevice,
         AudioUseWasapi,
         WasapiIsExclusive,
+        WasapiAutoSharedOnBackground,
         WasapiBufferSize,
         WasapiPeriod,
         VolumeUniversal,
