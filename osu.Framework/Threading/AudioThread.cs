@@ -1,4 +1,4 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
 using osu.Framework.Statistics;
@@ -14,6 +14,7 @@ using osu.Framework.Bindables;
 using osu.Framework.Development;
 using osu.Framework.Logging;
 using osu.Framework.Platform.Linux.Native;
+using ManagedBass.Fx;
 
 namespace osu.Framework.Threading
 {
@@ -130,19 +131,24 @@ namespace osu.Framework.Threading
         /// </summary>
         private readonly Bindable<int?> globalMixerHandle = new Bindable<int?>();
 
-        internal bool InitDevice(int deviceId, bool useExperimentalWasapi)
+        internal bool InitDevice(int deviceId, bool useWasapi, bool isExclusive, double buffer, double period)
         {
             Debug.Assert(ThreadSafety.IsAudioThread);
             Trace.Assert(deviceId != -1); // The real device ID should always be used, as the -1 device has special cases which are hard to work with.
 
+            // Always free any active WASAPI session before reinitialising BASS.
+            // If WASAPI was running in exclusive mode, holding the device prevents BASS from opening or re-initialising it.
+            freeWasapi();
+
             // Try to initialise the device, or request a re-initialise.
-            if (!Bass.Init(deviceId, Flags: (DeviceInitFlags)128)) // 128 == BASS_DEVICE_REINIT
+            if (!Bass.Init(deviceId, Flags: (DeviceInitFlags)128) && Bass.LastError != Errors.Already) // 128 == BASS_DEVICE_REINIT
                 return false;
 
-            if (useExperimentalWasapi)
-                attemptWasapiInitialisation();
-            else
-                freeWasapi();
+            if (useWasapi)
+            {
+                if (!attemptWasapiInitialisation(deviceId, isExclusive, buffer, period))
+                    return false;
+            }
 
             initialised_devices.Add(deviceId);
             return true;
@@ -182,7 +188,7 @@ namespace osu.Framework.Threading
             }
         }
 
-        private bool attemptWasapiInitialisation()
+        private bool attemptWasapiInitialisation(int deviceId, bool isExclusive, double buffer, double period)
         {
             if (RuntimeInfo.OS != RuntimeInfo.Platform.Windows)
                 return false;
@@ -195,9 +201,9 @@ namespace osu.Framework.Threading
             // Each device is listed multiple times with each supported channel/frequency pair.
             //
             // Working backwards to find the correct device is how bass does things internally (see BassWasapi.GetBassDevice).
-            if (Bass.CurrentDevice > 0)
+            if (deviceId > 0)
             {
-                string driver = Bass.GetDeviceInfo(Bass.CurrentDevice).Driver;
+                string driver = Bass.GetDeviceInfo(deviceId).Driver;
 
                 if (!string.IsNullOrEmpty(driver))
                 {
@@ -206,23 +212,27 @@ namespace osu.Framework.Threading
                     // It's intentionally quite high because if a user has many audio devices, this list can get long.
                     //
                     // Retrieving device info here isn't free. In the future we may want to investigate a better method.
-                    while (wasapiDevice < 16384)
+                    int dev = -1;
+                    while (dev < 16384)
                     {
-                        if (!BassWasapi.GetDeviceInfo(++wasapiDevice, out WasapiDeviceInfo info))
+                        if (!BassWasapi.GetDeviceInfo(++dev, out WasapiDeviceInfo info))
                             break;
 
                         if (info.ID == driver)
+                        {
+                            wasapiDevice = dev;
                             break;
+                        }
                     }
                 }
             }
 
             // To keep things in a sane state let's only keep one device initialised via wasapi.
             freeWasapi();
-            return initWasapi(wasapiDevice);
+            return initWasapi(wasapiDevice, isExclusive, buffer, period);
         }
 
-        private bool initWasapi(int wasapiDevice)
+        private bool initWasapi(int wasapiDevice, bool isExclusive, double buffer, double period)
         {
             // This is intentionally initialised inline and stored to a field.
             // If we don't do this, it gets GC'd away.
@@ -238,12 +248,39 @@ namespace osu.Framework.Threading
                 if (notify == WasapiNotificationType.DefaultOutput)
                 {
                     freeWasapi();
-                    initWasapi(device);
+                    initWasapi(device, isExclusive, buffer, period);
                 }
             });
+            float v = (float)period;
 
-            bool initialised = BassWasapi.Init(wasapiDevice, Procedure: wasapiProcedure, Flags: WasapiInitFlags.EventDriven | WasapiInitFlags.AutoFormat, Buffer: 0f, Period: float.Epsilon);
-            Logger.Log($"Initialising BassWasapi for device {wasapiDevice}...{(initialised ? "success!" : "FAILED")}");
+            // In shared mode, period should be float.Epsilon when 0 to request the minimum period.
+            // In exclusive mode, 0 requests the minimum supported period by the driver.
+            if (period < 1e-5)
+                v = isExclusive ? 0f : float.Epsilon;
+
+            bool initialised = BassWasapi.Init(
+                wasapiDevice,
+                Procedure: wasapiProcedure,
+                Flags: WasapiInitFlags.EventDriven | WasapiInitFlags.AutoFormat | (isExclusive ? WasapiInitFlags.Exclusive : 0),
+                Buffer: (float)buffer,
+                Period: v
+            );
+
+            Logger.Log($"Initialising BassWasapi for device {wasapiDevice}...{(initialised ? "success!" : $"FAILED ({Bass.LastError})")}");
+
+            if (!initialised && isExclusive)
+            {
+                Logger.Log($"Initialising BassWasapi in exclusive mode failed ({Bass.LastError}), retrying in shared mode...", level: LogLevel.Important);
+                freeWasapi();
+
+                initialised = BassWasapi.Init(
+                    wasapiDevice,
+                    Procedure: wasapiProcedure,
+                    Flags: WasapiInitFlags.EventDriven | WasapiInitFlags.AutoFormat,
+                    Buffer: 0f,
+                    Period: float.Epsilon
+                );
+            }
 
             if (!initialised)
                 return false;
@@ -258,13 +295,15 @@ namespace osu.Framework.Threading
 
         private void freeWasapi()
         {
-            if (globalMixerHandle.Value == null) return;
+            if (globalMixerHandle.Value != null)
+            {
+                // The mixer probably doesn't need to be recycled. Just keeping things sane for now.
+                Bass.StreamFree(globalMixerHandle.Value.Value);
+                globalMixerHandle.Value = null;
+            }
 
-            // The mixer probably doesn't need to be recycled. Just keeping things sane for now.
-            Bass.StreamFree(globalMixerHandle.Value.Value);
             BassWasapi.Stop();
             BassWasapi.Free();
-            globalMixerHandle.Value = null;
         }
 
         #endregion

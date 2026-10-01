@@ -1,4 +1,4 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
 #nullable disable
@@ -103,7 +103,12 @@ namespace osu.Framework.Audio
         /// This generally results in lower audio latency, but also changes the audio synchronisation from
         /// historical expectations, meaning users / application will have to account for different offsets.
         /// </summary>
-        public readonly BindableBool UseExperimentalWasapi = new BindableBool();
+        public readonly BindableBool UseWasapi = new BindableBool();
+
+        public readonly BindableBool WasapiIsExclusive = new();
+        // BASS accpets a float but let us use double here to avoid fp issues.
+        public readonly BindableDouble WasapiBufferSize = new();
+        public readonly BindableDouble WasapiPeriod = new();
 
         /// <summary>
         /// Volume of all samples played game-wide.
@@ -189,14 +194,26 @@ namespace osu.Framework.Audio
             {
                 // attach config bindables
                 config.BindWith(FrameworkSetting.AudioDevice, AudioDevice);
-                config.BindWith(FrameworkSetting.AudioUseExperimentalWasapi, UseExperimentalWasapi);
+                config.BindWith(FrameworkSetting.AudioUseWasapi, UseWasapi);
+                config.BindWith(FrameworkSetting.WasapiIsExclusive, WasapiIsExclusive);
+                config.BindWith(FrameworkSetting.WasapiBufferSize, WasapiBufferSize);
+                config.BindWith(FrameworkSetting.WasapiPeriod, WasapiPeriod);
                 config.BindWith(FrameworkSetting.VolumeUniversal, Volume);
                 config.BindWith(FrameworkSetting.VolumeEffect, VolumeSample);
                 config.BindWith(FrameworkSetting.VolumeMusic, VolumeTrack);
             }
 
             AudioDevice.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
-            UseExperimentalWasapi.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
+            UseWasapi.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
+            WasapiIsExclusive.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
+            WasapiBufferSize.MinValue = 0;
+            WasapiBufferSize.MaxValue = 0.5;
+            WasapiBufferSize.Precision = 1e-3;
+            WasapiPeriod.MinValue = 0;
+            WasapiPeriod.MaxValue = 0.5;
+            WasapiPeriod.Precision = 1e-3;
+            WasapiBufferSize.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
+            WasapiPeriod.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
             // initCurrentDevice not required for changes to `GlobalMixerHandle` as it is only changed when experimental wasapi is toggled (handled above).
             GlobalMixerHandle.ValueChanged += handle => usingGlobalMixer.Value = handle.NewValue.HasValue;
 
@@ -448,28 +465,23 @@ namespace osu.Framework.Audio
 
             bool success = attemptInit();
 
-            if (success || !UseExperimentalWasapi.Value)
+            if (success || !UseWasapi.Value)
                 return success;
 
             // in the case we're using experimental WASAPI, give a second chance of initialisation by forcefully disabling it.
             Logger.Log($"BASS device {device} failed to initialise with experimental WASAPI, disabling", level: LogLevel.Error);
-            UseExperimentalWasapi.Value = false;
+            eventScheduler.Add(() => UseWasapi.Value = false);
+            UseWasapi.Value = false;
             return attemptInit();
 
             bool attemptInit()
             {
-                bool innerSuccess = thread.InitDevice(device, UseExperimentalWasapi.Value);
-                bool alreadyInitialised = Bass.LastError == Errors.Already;
-
-                if (alreadyInitialised)
-                    return true;
-
-                if (BassUtils.CheckFaulted(false))
-                    return false;
+                bool isExclusive = WasapiIsExclusive.Value;
+                bool innerSuccess = thread.InitDevice(device, UseWasapi.Value, isExclusive, WasapiBufferSize.Value, WasapiPeriod.Value);
 
                 if (!innerSuccess)
                 {
-                    Logger.Log("BASS failed to initialize but did not provide an error code", level: LogLevel.Error);
+                    Logger.Log("BASS failed to initialize", level: LogLevel.Error);
                     return false;
                 }
 

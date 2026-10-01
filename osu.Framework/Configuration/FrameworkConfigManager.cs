@@ -1,4 +1,4 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
 #nullable disable
@@ -32,7 +32,7 @@ namespace osu.Framework.Configuration
             SetDefault(FrameworkSetting.WindowedPositionY, 0.5, -0.5, 1.5);
             SetDefault(FrameworkSetting.LastDisplayDevice, DisplayIndex.Default);
             SetDefault(FrameworkSetting.AudioDevice, string.Empty);
-            SetDefault(FrameworkSetting.AudioUseExperimentalWasapi, false);
+            SetDefault(FrameworkSetting.AudioUseWasapi, false);
             SetDefault(FrameworkSetting.VolumeUniversal, 1.0, 0.0, 1.0, 0.01);
             SetDefault(FrameworkSetting.VolumeMusic, 1.0, 0.0, 1.0, 0.01);
             SetDefault(FrameworkSetting.VolumeEffect, 1.0, 0.0, 1.0, 0.01);
@@ -43,6 +43,9 @@ namespace osu.Framework.Configuration
             SetDefault(FrameworkSetting.WindowMode, WindowMode.Windowed);
             SetDefault(FrameworkSetting.Renderer, RendererType.Automatic);
             SetDefault(FrameworkSetting.ShowUnicode, false);
+            SetDefault(FrameworkSetting.WasapiIsExclusive, false);
+            SetDefault(FrameworkSetting.WasapiBufferSize, 0.0);
+            SetDefault(FrameworkSetting.WasapiPeriod, 0.0);
             SetDefault(FrameworkSetting.Locale, string.Empty);
 
 #pragma warning disable 618
@@ -80,7 +83,10 @@ namespace osu.Framework.Configuration
         ShowLogOverlay,
 
         AudioDevice,
-        AudioUseExperimentalWasapi,
+        AudioUseWasapi,
+        WasapiIsExclusive,
+        WasapiBufferSize,
+        WasapiPeriod,
         VolumeUniversal,
         VolumeEffect,
         VolumeMusic,
