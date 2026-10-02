@@ -121,12 +121,27 @@ namespace osu.Framework.Graphics.Containers
 
             cancellationTokenSource = new CancellationTokenSource();
 
+            ChildLoadFailed += onChildLoadFailed;
+
             // The callback is run on the game's scheduler since DelayedLoadUnloadWrapper needs to unload when no updates are being received.
             LoadComponentAsync(Content, EndDelayedLoad, scheduler: Game.Scheduler, cancellation: cancellationTokenSource.Token);
         }
 
+        /// <summary>
+        /// Invoked when the asynchronous load of <see cref="Content"/> failed and was isolated (see <see cref="Development.LoadErrorHandling"/>).
+        /// </summary>
+        /// <remarks>
+        /// A placeholder is put in place of the content, so that a failure does not leave this wrapper permanently empty.
+        /// This runs on the update thread, as <see cref="CompositeDrawable.ChildLoadFailed"/> is scheduled. Note that this goes through the
+        /// same <see cref="CompositeDrawable.CreateLoadErrorPlaceholder"/> hook as a synchronous failure, so a customised placeholder is
+        /// presented here too.
+        /// </remarks>
+        private void onChildLoadFailed(Drawable failed, Exception exception) => EndDelayedLoad(CreateMarkedLoadErrorPlaceholder(failed, exception));
+
         protected virtual void EndDelayedLoad(Drawable content)
         {
+            ChildLoadFailed -= onChildLoadFailed;
+
             timeVisible = 0;
 
             // This code is running on the game's scheduler, while this wrapper may have been async disposed, so the addition is scheduled locally to prevent adding to disposed wrappers.
