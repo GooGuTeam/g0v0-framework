@@ -1288,6 +1288,17 @@ namespace osu.Framework.Platform
                 TypePerformanceMonitor.Active = logging.NewValue;
             }, true);
 
+            // deliberately not applied when running under a test harness, so that a load failure surfaces as a test failure
+            // rather than as a placeholder (see DebugUtils.IsNUnitRunning). the default value of LoadErrorHandling already
+            // accounts for this, so tests remain unaffected even without this guard.
+            if (!DebugUtils.IsNUnitRunning)
+            {
+                var loadErrorPlaceholders = Config.GetBindable<bool>(FrameworkSetting.LoadErrorPlaceholders);
+
+                LoadErrorHandling.Enabled = loadErrorPlaceholders.Value;
+                loadErrorPlaceholders.BindValueChanged(placeholders => LoadErrorHandling.Enabled = placeholders.NewValue);
+            }
+
             bypassFrontToBackPass = DebugConfig.GetBindable<bool>(DebugSetting.BypassFrontToBackPass);
 
             threadLocale = Config.GetBindable<string>(FrameworkSetting.Locale);
