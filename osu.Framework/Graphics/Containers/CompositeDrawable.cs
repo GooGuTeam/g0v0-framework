@@ -14,6 +14,7 @@ using osuTK;
 using osuTK.Graphics;
 using osu.Framework.Graphics.Shaders;
 using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Extensions.TypeExtensions;
 using osu.Framework.Graphics.Colour;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics.Transforms;
@@ -238,10 +239,34 @@ namespace osu.Framework.Graphics.Containers
                 if (cancellation.IsCancellationRequested)
                     break;
 
-                if (!components[i].LoadFromAsync(Clock, dependencies, isDirectAsyncContext))
+                TLoadable component = components[i];
+
+                try
                 {
-                    LoadingComponentsLogger.Remove(components[i]);
-                    components.Remove(components[i--]);
+                    if (!component.LoadFromAsync(Clock, dependencies, isDirectAsyncContext))
+                    {
+                        LoadingComponentsLogger.Remove(component);
+                        components.RemoveAt(i--);
+                    }
+                }
+                catch (Exception e) when (LoadErrorHandling.Enabled && !isCancellation(e))
+                {
+                    // isolate the component so that a single bad component does not abort loading of the entire batch (and, more importantly,
+                    // does not take the game down with it as an unhandled exception on the update thread).
+                    Logger.Error(e, $"Failed to load {component.GetType().ReadableName()} via {nameof(LoadComponentsAsync)}."
+                                    + $" Continuing without it, and notifying for a placeholder ({nameof(LoadErrorHandling)}).", recursive: true);
+
+                    discardFailedComponent(component);
+                    components.RemoveAt(i--);
+
+                    Drawable failed = component;
+                    Exception failure = singular(e);
+
+                    Scheduler.Add(() =>
+                    {
+                        // only notify once the load has been discarded, to mirror the failure being observed on the update thread.
+                        ChildLoadFailed?.Invoke(failed, failure);
+                    });
                 }
             }
         }
@@ -256,10 +281,14 @@ namespace osu.Framework.Graphics.Containers
             // We are in a potentially async context, so let's aggressively load all our children
             // regardless of their alive state. this also gives children a clock so they can be checked
             // for their correct alive state in the case LifetimeStart is set to a definite value.
-            foreach (var c in internalChildren)
+            //
+            // note that this is an index-based loop, as a child which fails to load may be replaced in-place by the failure handling in loadChild().
+            for (int i = 0; i < internalChildren.Count; i++)
             {
                 cancellation?.ThrowIfCancellationRequested();
-                loadChild(c);
+
+                if (!loadChild(internalChildren[i]))
+                    i--;
             }
         }
 
@@ -276,31 +305,341 @@ namespace osu.Framework.Graphics.Containers
         /// <summary>
         /// Loads a <see cref="Drawable"/> child. This will not throw in the event of the load being cancelled.
         /// </summary>
+        /// <remarks>
+        /// If the child throws while loading and <see cref="LoadErrorHandling.Enabled"/> is <c>true</c>, the child is discarded and replaced
+        /// with a placeholder (see <see cref="CreateLoadErrorPlaceholder"/>) rather than propagating the exception.
+        /// </remarks>
         /// <param name="child">The <see cref="Drawable"/> child to load.</param>
-        private void loadChild(Drawable child)
+        /// <returns>
+        /// Whether <paramref name="child"/> is still a usable child of this <see cref="CompositeDrawable"/>.
+        /// A return value of <c>false</c> indicates that the child failed to load, and has been discarded.
+        /// </returns>
+        private bool loadChild(Drawable child)
         {
             try
             {
                 if (IsDisposed)
-                    return;
+                    return true;
 
                 child.Load(Clock, Dependencies, false);
 
                 child.Parent = this;
+                return true;
             }
-            catch (OperationCanceledException)
+            catch (Exception e) when (isCancellation(e))
             {
+                return true;
             }
-            catch (AggregateException ae)
+            catch (Exception e)
             {
-                foreach (var e in ae.Flatten().InnerExceptions)
-                {
-                    if (e is OperationCanceledException)
-                        continue;
+                if (!LoadErrorHandling.Enabled)
+                    // preserve the pre-existing behaviour of letting the exception out of the load pipeline. note that this is deliberately
+                    // rethrown rather than thrown, so that the original stack (and the reason for the inlined inner exception) is preserved.
+                    ExceptionDispatchInfo.Capture(singular(e)).Throw();
 
-                    ExceptionDispatchInfo.Capture(e).Throw();
+                isolateFailedChild(child, singular(e));
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Handles a child which failed to load by discarding it and adding a placeholder in its place.
+        /// </summary>
+        /// <remarks>
+        /// This must never throw - a failure here would defeat the purpose of isolation.
+        /// </remarks>
+        private void isolateFailedChild(Drawable child, Exception exception)
+        {
+            if (loadErrorHandlingDepth > 0 || child.IsLoadErrorPlaceholder)
+            {
+                // the placeholder created for a previous failure has itself failed to load. rather than recursing, give up on this slot.
+                Logger.Error(exception, $"A load error placeholder in {GetType().ReadableName()} failed to load."
+                                        + " No further replacement will be attempted for this child.", recursive: true);
+
+                discardFailedComponent(child);
+                return;
+            }
+
+            Logger.Error(exception, $"Failed to load {child.GetType().ReadableName()} in {GetType().ReadableName()}."
+                                    + $" Continuing without it, and replacing it with a placeholder ({nameof(LoadErrorHandling)}).", recursive: true);
+
+            // capture the layout configuration of the failed child before discarding it, so the placeholder can occupy the same slot.
+            SlotConfiguration slot = captureSlotConfiguration(child);
+
+            // the child ID determines where the placeholder lands in both the sorted child list (see Compare()) and in flowing
+            // layouts (see FlowContainer.FlowingChildren), so it has to be read before the child is discarded (disposal resets it).
+            ulong childId = child.ChildID;
+
+            discardFailedComponent(child);
+
+            if (IsDisposed)
+                return;
+
+            loadErrorHandlingDepth++;
+
+            Drawable placeholder;
+
+            try
+            {
+                placeholder = CreateMarkedLoadErrorPlaceholder(child, exception);
+
+                // the placeholder is aligned with the failed component's slot unconditionally, including for game-provided placeholders: the
+                // properties being copied here (in particular the anchor, which flowing layouts require to agree across all children) are part
+                // of the contract with the parent's layout, not presentation. a placeholder still controls how it looks within that slot.
+                applySlotConfiguration(placeholder, in slot);
+
+                AddInternal(placeholder);
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, $"Failed to add a load error placeholder for a {child.GetType().ReadableName()} in {GetType().ReadableName()}.");
+                return;
+            }
+            finally
+            {
+                loadErrorHandlingDepth--;
+            }
+
+            try
+            {
+                // AddInternal() assigns the placeholder a fresh child ID, which sorts it after every existing child - i.e. the failure would be
+                // reported at the end of the container rather than in the slot the failed component used to occupy. inheriting the failed child's
+                // ID both restores the slot and keeps IDs unique (that child has been removed and disposed by this point).
+                // this mirrors what ChangeChildDepth() does, including the re-sort which re-inserts into the sorted child list.
+                if (IndexOfInternal(placeholder) >= 0)
+                {
+                    placeholder.ChildID = childId;
+                    SortInternal();
                 }
             }
+            catch (Exception e)
+            {
+                // worst case the placeholder is drawn at the end of the container rather than in the failed component's slot.
+                Logger.Error(e, $"Failed to reposition a load error placeholder for a {child.GetType().ReadableName()} in {GetType().ReadableName()}.");
+            }
+        }
+
+        private int loadErrorHandlingDepth;
+
+        /// <summary>
+        /// Removes a component which failed to load from this <see cref="CompositeDrawable"/>, and schedules it for disposal.
+        /// </summary>
+        /// <remarks>
+        /// This must never throw - a failure here would defeat the purpose of isolation.
+        /// </remarks>
+        private void discardFailedComponent(Drawable component)
+        {
+            try
+            {
+                if (IndexOfInternal(component) >= 0)
+                    RemoveInternal(component, false);
+
+                loadingComponents?.Remove(component);
+                LoadingComponentsLogger.Remove(component);
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, $"Failed to clean up a {component.GetType().ReadableName()} which failed to load in {GetType().ReadableName()}.");
+            }
+
+            try
+            {
+                // a partially loaded drawable may still hold resources (e.g. a bound audio track), so it has to be disposed rather than leaked.
+                // disposal is deferred as it can run arbitrary user code.
+                DisposeChildAsync(component);
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, $"Failed to dispose a {component.GetType().ReadableName()} which failed to load in {GetType().ReadableName()}.");
+            }
+        }
+
+        /// <summary>
+        /// The layout configuration of a child, used to place a placeholder in the slot the child occupied.
+        /// </summary>
+        private struct SlotConfiguration
+        {
+            public float Depth;
+            public Vector2 Size;
+            public Axes RelativeSizeAxes;
+            public Axes AutoSizeAxes;
+            public Anchor Anchor;
+            public Vector2 RelativeAnchorPosition;
+            public Anchor Origin;
+
+            /// <summary>
+            /// A configuration which is safe to apply even when reading the child's own configuration failed.
+            /// </summary>
+            public static SlotConfiguration Default => new SlotConfiguration
+            {
+                Anchor = Anchor.TopLeft,
+                Origin = Anchor.TopLeft,
+            };
+        }
+
+        /// <summary>
+        /// Reads the layout configuration of a child which is about to be discarded. Never throws, falling back to defaults on failure.
+        /// </summary>
+        private SlotConfiguration captureSlotConfiguration(Drawable child)
+        {
+            SlotConfiguration slot = SlotConfiguration.Default;
+
+            try
+            {
+                slot.Depth = child.Depth;
+                slot.Anchor = child.Anchor;
+                slot.RelativeAnchorPosition = child.RelativeAnchorPosition;
+                slot.Origin = child.Origin;
+                slot.RelativeSizeAxes = child.RelativeSizeAxes;
+                slot.AutoSizeAxes = (child as CompositeDrawable)?.AutoSizeAxes ?? Axes.None;
+
+                // reading the size of an auto-sizing composite may attempt to compute its children's size, which is not safe for a partially loaded drawable.
+                if (slot.AutoSizeAxes == Axes.None)
+                    slot.Size = child.Size;
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, $"Failed to read the layout of a {child.GetType().ReadableName()} which failed to load in {GetType().ReadableName()}.");
+            }
+
+            return slot;
+        }
+
+        /// <summary>
+        /// Aligns a placeholder with the slot the component it replaces occupied.
+        /// </summary>
+        /// <remarks>
+        /// This must never throw - a failure here would leave the placeholder present but possibly mis-sized.
+        /// </remarks>
+        private static void applySlotConfiguration(Drawable placeholder, in SlotConfiguration slot)
+        {
+            try
+            {
+                placeholder.Depth = slot.Depth;
+                placeholder.Origin = slot.Origin;
+
+                // the anchor of a child is part of its contract with the parent's layout - a flowing parent requires every child to agree on it -
+                // so it has to be copied across for the parent to remain valid, regardless of what the placeholder chose for itself.
+                if (slot.Anchor == Anchor.Custom)
+                    placeholder.RelativeAnchorPosition = slot.RelativeAnchorPosition;
+                else
+                    placeholder.Anchor = slot.Anchor;
+
+                // sizing itself is only available to a composite, so a slot which relies on it cannot be reproduced by any other placeholder.
+                Axes autoSizeAxes = placeholder is CompositeDrawable ? slot.AutoSizeAxes : Axes.None;
+
+                // a slot which is empty on an axis cannot show anything, so inheriting it would hide the placeholder - the opposite of the point of
+                // reporting the failure in the failed component's place. where that is the case, the placeholder is left to size itself, exactly as
+                // it is when there is no failed component to inherit a slot from at all (an asynchronous failure, for instance).
+                if (hasNoExtent(in slot, autoSizeAxes))
+                    return;
+
+                // each axis is sized in exactly one of three ways. sizing itself and sizing relatively are mutually exclusive per axis (see
+                // AutoSizeAxes), so self-sizing is cleared first and restored afterwards, and the absolute size only applies to the axes which are
+                // neither relatively nor automatically sized.
+                if (placeholder is CompositeDrawable composite)
+                    composite.AutoSizeAxes = Axes.None;
+
+                placeholder.RelativeSizeAxes = slot.RelativeSizeAxes;
+
+                if (placeholder is CompositeDrawable autoSizing)
+                    autoSizing.AutoSizeAxes = autoSizeAxes;
+
+                if ((autoSizeAxes & Axes.X) == 0)
+                    placeholder.Width = slot.Size.X;
+
+                if ((autoSizeAxes & Axes.Y) == 0)
+                    placeholder.Height = slot.Size.Y;
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, $"Failed to align a load error placeholder with the slot of a component which failed to load in a {nameof(CompositeDrawable)}.");
+            }
+        }
+
+        /// <summary>
+        /// Whether <paramref name="slot"/> describes a region with no extent on some axis, and therefore cannot hold a visible placeholder.
+        /// </summary>
+        /// <param name="slot">The slot to inspect.</param>
+        /// <param name="autoSizeAxes">
+        /// The axes along which the slot's self-sizing can actually be reproduced, as determined by <see cref="applySlotConfiguration"/>.
+        /// </param>
+        private static bool hasNoExtent(in SlotConfiguration slot, Axes autoSizeAxes)
+        {
+            // an axis which the failed component sized by itself always has an extent, whatever value its (then meaningless) size carries.
+            bool noWidth = (autoSizeAxes & Axes.X) == 0 && slot.Size.X == 0;
+            bool noHeight = (autoSizeAxes & Axes.Y) == 0 && slot.Size.Y == 0;
+
+            return noWidth || noHeight;
+        }
+
+        /// <summary>
+        /// Creates the placeholder which replaces a child that failed to load, when <see cref="LoadErrorHandling.Enabled"/> is <c>true</c>.
+        /// </summary>
+        /// <remarks>
+        /// The default implementation uses <see cref="LoadErrorHandling.PlaceholderFactory"/>, and falls back to <see cref="LoadErrorPlaceholder"/>.
+        /// Override this to present load failures in a style (or location) better suited to the game - note that an exception thrown by an override
+        /// is logged, and results in no placeholder being added.
+        /// </remarks>
+        /// <param name="failedChild">The child which failed to load.</param>
+        /// <param name="exception">The exception which was thrown while loading <paramref name="failedChild"/>.</param>
+        protected virtual Drawable CreateLoadErrorPlaceholder(Drawable failedChild, Exception exception)
+            => LoadErrorHandling.PlaceholderFactory?.Invoke(failedChild, exception) ?? new LoadErrorPlaceholder(failedChild, exception);
+
+        /// <summary>
+        /// Creates a placeholder for a component which failed to load via <see cref="CreateLoadErrorPlaceholder"/>, marking it as such.
+        /// </summary>
+        /// <remarks>
+        /// Framework code should create placeholders through this method rather than calling <see cref="CreateLoadErrorPlaceholder"/> directly.
+        /// The mark is what stops a failure within a placeholder (in particular one which only surfaces while completing its load, after it has been
+        /// added to the hierarchy) from being answered with yet another placeholder, indefinitely.
+        /// </remarks>
+        /// <param name="failedChild">The child which failed to load.</param>
+        /// <param name="exception">The exception which was thrown while loading <paramref name="failedChild"/>.</param>
+        protected Drawable CreateMarkedLoadErrorPlaceholder(Drawable failedChild, Exception exception)
+        {
+            Drawable placeholder = CreateLoadErrorPlaceholder(failedChild, exception);
+
+            if (placeholder != null)
+                placeholder.IsLoadErrorPlaceholder = true;
+
+            return placeholder;
+        }
+
+        /// <summary>
+        /// Invoked when a child of this <see cref="CompositeDrawable"/> failed to load and was isolated (see <see cref="LoadErrorHandling.Enabled"/>).
+        /// </summary>
+        /// <remarks>
+        /// This is only invoked for components which are loaded asynchronously (e.g. via <see cref="LoadComponentAsync{TLoadable}"/>), as those are not yet
+        /// part of this <see cref="CompositeDrawable"/> and therefore cannot be replaced in-place. Callbacks which add such components at a later point
+        /// (see <see cref="DelayedLoadWrapper"/>) should use this to present a placeholder instead.
+        /// <para>
+        /// This is invoked on the update thread, via <see cref="Scheduler"/>.
+        /// </para>
+        /// </remarks>
+        public event Action<Drawable, Exception> ChildLoadFailed;
+
+        /// <summary>
+        /// Whether <paramref name="exception"/> represents a cancelled load operation rather than a genuine failure.
+        /// </summary>
+        private static bool isCancellation(Exception exception)
+            => exception is OperationCanceledException
+               || (exception is AggregateException aggregate && aggregate.Flatten().InnerExceptions.All(e => e is OperationCanceledException));
+
+        /// <summary>
+        /// Selects the exception which best represents <paramref name="exception"/>, unwrapping <see cref="AggregateException"/>s.
+        /// </summary>
+        private static Exception singular(Exception exception)
+        {
+            if (exception is AggregateException aggregate)
+            {
+                Exception inner = aggregate.Flatten().InnerExceptions.FirstOrDefault(e => e is not OperationCanceledException);
+
+                if (inner != null)
+                    return inner;
+            }
+
+            return exception;
         }
 
         protected override void Dispose(bool isDisposing)
@@ -598,8 +937,9 @@ namespace osu.Framework.Graphics.Containers
 
                 if (drawable.LoadState >= LoadState.Ready)
                     drawable.Parent = this;
-                else
-                    loadChild(drawable);
+                else if (!loadChild(drawable))
+                    // the child failed to load, and has been discarded in favour of a placeholder (added by the failure handling in loadChild()).
+                    return;
             }
 
             internalChildren.Add(drawable);
@@ -755,7 +1095,10 @@ namespace osu.Framework.Graphics.Containers
                     if (child.LoadState < LoadState.Ready)
                     {
                         // If we're already loaded, we can eagerly allow children to be loaded
-                        loadChild(child);
+                        if (!loadChild(child))
+                            // the child failed to load, and has been replaced or removed. signal removal so the caller accounts for the now-shifted index.
+                            return ChildLifeStateChange.Removed;
+
                         if (child.LoadState < LoadState.Ready)
                             return ChildLifeStateChange.None;
                     }
@@ -926,14 +1269,20 @@ namespace osu.Framework.Graphics.Containers
                     Drawable c = aliveInternalChildren[i];
 
                     TypePerformanceMonitor.BeginCollecting(c);
-                    updateChild(c);
+
+                    if (!updateChild(c))
+                        i--;
+
                     TypePerformanceMonitor.EndCollecting(c);
                 }
             }
             else
             {
                 for (int i = 0; i < aliveInternalChildren.Count; ++i)
-                    updateChild(aliveInternalChildren[i]);
+                {
+                    if (!updateChild(aliveInternalChildren[i]))
+                        i--;
+                }
             }
 
             if (schedulerAfterChildren != null)
@@ -949,10 +1298,36 @@ namespace osu.Framework.Graphics.Containers
             return true;
         }
 
-        private void updateChild(Drawable c)
+        /// <summary>
+        /// Updates a child, isolating a failure which occurs while the child completes its load.
+        /// </summary>
+        /// <remarks>
+        /// The load-complete phase is conceptually part of loading, but - unlike the rest of it - it runs here, on the update thread (see
+        /// <see cref="Drawable.UpdateSubTree"/>). It is therefore isolated here rather than in <see cref="loadChild(Drawable)"/>, so that a component
+        /// which was misconfigured in a way that only surfaces while completing its load does not take down the game.
+        /// </remarks>
+        /// <returns>
+        /// Whether <paramref name="child"/> is still an alive child of this <see cref="CompositeDrawable"/>. A return value of <c>false</c> indicates
+        /// that it was discarded, and that every subsequent child has shifted down an index.
+        /// </returns>
+        private bool updateChild(Drawable child)
         {
-            Debug.Assert(c.LoadState >= LoadState.Ready);
-            c.UpdateSubTree();
+            Debug.Assert(child.LoadState >= LoadState.Ready);
+
+            try
+            {
+                child.RunLoadComplete();
+            }
+            catch (Exception e) when (LoadErrorHandling.Enabled)
+            {
+                isolateFailedChild(child, singular(e));
+
+                // isolation removes the child from this container (and from aliveInternalChildren), shifting the remaining children down an index.
+                return child.IsAlive;
+            }
+
+            child.UpdateSubTree();
+            return true;
         }
 
         /// <summary>
