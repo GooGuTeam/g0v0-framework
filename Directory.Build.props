@@ -43,14 +43,16 @@
     <AnalysisModeUsage>Default</AnalysisModeUsage>
   </PropertyGroup>
   <PropertyGroup Label="NuGet">
-    <Authors>ppy Pty Ltd</Authors>
-    <Company>ppy Pty Ltd</Company>
-    <Copyright>Copyright (c) 2024 ppy Pty Ltd</Copyright>
-    <Product>osu!framework</Product>
-    <PackageReleaseNotes>Automated release.</PackageReleaseNotes>
+    <Authors>ppy Pty Ltd &amp; GooGuTeam</Authors>
+    <Company>GooGuTeam</Company>
+    <Copyright>Copyright (c) 2026 ppy Pty Ltd, GooGuTeam</Copyright>
+    <Product>g0v0!framework</Product>
+    <PackageReleaseNotes>g0v0!framework is a community project based on the osu!framework codebase.
+Original code from https://github.com/ppy/osu-framework (Copyright (c) ppy Pty Ltd), modified by GooGuTeam.
+Full licence text: see LICENCE and LICENCE-OSU.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageIcon>icon.png</PackageIcon>
-    <PackageProjectUrl>https://github.com/ppy/osu-framework</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/ppy/osu-framework</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/GooGuTeam/g0v0-framework</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/GooGuTeam/g0v0-framework</RepositoryUrl>
   </PropertyGroup>
 </Project>

@@ -3,9 +3,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <OutputType>Library</OutputType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyTitle>osu!framework</AssemblyTitle>
+    <AssemblyTitle>g0v0!framework</AssemblyTitle>
     <AssemblyName>osu.Framework</AssemblyName>
-    <Description>A 2D application/game framework written with rhythm games in mind.</Description>
+    <Description>A 2D application/game framework written with rhythm games in mind.
+
+A community project based on the osu!framework codebase, originally developed by ppy Pty Ltd and modified/maintained by GooGuTeam.</Description>
     <!-- Enabling this breaks iOS projects from building due to silly naming conflicts (https://github.com/dotnet/runtime/issues/79500#issuecomment-1345624309).
          It's still enabled externally on packaging scripts so should be fine to disable in project. -->
     <!--<GenerateDocumentationFile>true</GenerateDocumentationFile>-->
@@ -13,10 +15,12 @@
     <DefineConstants>$(DefineConstants);JETBRAINS_ANNOTATIONS</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Label="Nuget">
-    <Title>osu!framework</Title>
-    <PackageId>ppy.osu.Framework</PackageId>
-    <PackageReleaseNotes>Automated release.</PackageReleaseNotes>
-    <PackageTags>osu game framework</PackageTags>
+    <Title>g0v0!framework</Title>
+    <PackageId>g0v0.Framework</PackageId>
+    <PackageReleaseNotes>g0v0!framework is a community project based on the osu!framework codebase.
+Original code from https://github.com/ppy/osu-framework (Copyright (c) ppy Pty Ltd), modified by GooGuTeam.
+Full licence text: see LICENCE and LICENCE-OSU.</PackageReleaseNotes>
+    <PackageTags>g0v0 osu game framework</PackageTags>
   </PropertyGroup>
   <ItemGroup Label="Package References">
     <PackageReference Include="FFmpeg.AutoGen" Version="4.3.0.1" />
