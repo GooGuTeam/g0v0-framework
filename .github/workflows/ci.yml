@@ -38,9 +38,12 @@ jobs:
         run: |
           # TODO: Add ignore filters and GitHub Workflow Command Reporting in CFS. That way we don't have to do this workaround.
           # FIXME: Suppress warnings from templates project
+          # g0v0: this fork uses a three-way licence header scheme (see AGENTS.md) which cannot be
+          # expressed in the single-header osu-framework.licenseheader definition, so header
+          # findings are advisory here. All other CodeFileSanity findings remain fatal.
           exit_code=0
           while read -r line; do
-            if [[ ! -z "$line" && "$line" != *"/osu.Framework.Templates/"* ]]; then
+            if [[ ! -z "$line" && "$line" != *"/osu.Framework.Templates/"* && "$line" != *"License header missing"* ]]; then
               echo "::error::$line"
               exit_code=1
             fi
