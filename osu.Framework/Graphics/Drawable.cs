@@ -202,6 +202,15 @@ namespace osu.Framework.Graphics
         public LoadState LoadState => loadState;
 
         /// <summary>
+        /// Whether this <see cref="Drawable"/> was created as the replacement for a component which failed to load
+        /// (see <see cref="CompositeDrawable.CreateLoadErrorPlaceholder"/>).
+        /// </summary>
+        /// <remarks>
+        /// Used to avoid answering a failure within a placeholder with yet another placeholder, indefinitely.
+        /// </remarks>
+        internal bool IsLoadErrorPlaceholder { get; set; }
+
+        /// <summary>
         /// The thread on which the <see cref="Load"/> operation started, or null if <see cref="Drawable"/> has not started loading.
         /// </summary>
         internal Thread LoadThread { get; private set; }
@@ -323,6 +332,24 @@ namespace osu.Framework.Graphics
 
             OnLoadComplete?.Invoke(this);
             OnLoadComplete = null;
+            return true;
+        }
+
+        /// <summary>
+        /// Runs the load-complete phase of this <see cref="Drawable"/> (see <see cref="LoadComplete"/>) if it is still pending.
+        /// </summary>
+        /// <remarks>
+        /// This is normally invoked from <see cref="UpdateSubTree"/>. It is exposed separately so that a <see cref="CompositeDrawable"/> can run it
+        /// for a child before updating that child, and isolate a failure in the same way as a failure in the load pipeline proper. Unlike the rest of
+        /// loading, this phase runs on the update thread, so a failure in it would otherwise take the whole game down with it.
+        /// </remarks>
+        /// <returns>Whether this invocation completed the load of this <see cref="Drawable"/>.</returns>
+        internal bool RunLoadComplete()
+        {
+            if (loadState != LoadState.Ready)
+                return false;
+
+            loadComplete();
             return true;
         }
 
@@ -476,8 +503,9 @@ namespace osu.Framework.Graphics
             if (loadState < LoadState.Ready)
                 return false;
 
-            if (loadState == LoadState.Ready)
-                loadComplete();
+            // normally already run by our parent, so that a failure can be isolated (see CompositeDrawable.updateChild()). this remains here for
+            // drawables which are updated without going through a CompositeDrawable parent.
+            RunLoadComplete();
 
             Debug.Assert(loadState == LoadState.Loaded);
 

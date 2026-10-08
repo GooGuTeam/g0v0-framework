@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using osu.Framework.Configuration.Tracking;
+using osu.Framework.Development;
 using osu.Framework.Extensions;
 using osu.Framework.Graphics.Video;
 using osu.Framework.Input;
@@ -48,6 +49,8 @@ namespace osu.Framework.Configuration
             SetDefault(FrameworkSetting.WasapiBufferSize, 0.0);
             SetDefault(FrameworkSetting.WasapiPeriod, 0.0);
             SetDefault(FrameworkSetting.Locale, string.Empty);
+
+            SetDefault(FrameworkSetting.LoadErrorPlaceholders, !DebugUtils.IsNUnitRunning);
 
 #pragma warning disable 618
             SetDefault(FrameworkSetting.MapAbsoluteInputToWindow, false);
@@ -115,6 +118,12 @@ namespace osu.Framework.Configuration
 
         ShowUnicode,
         Locale,
+
+        /// <summary>
+        /// Whether a <see cref="osu.Framework.Graphics.Drawable"/> which throws while loading should be replaced with a placeholder
+        /// drawable rather than terminating the game. See <see cref="LoadErrorHandling"/>.
+        /// </summary>
+        LoadErrorPlaceholders,
 
         [Obsolete("Input-related settings are now stored in InputConfigManager. Adjustments should be made via Host.AvailableInputHandlers bindables directly.")] // can be removed 20210911
         IgnoredInputHandlers,
