@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
@@ -70,6 +70,18 @@ namespace osu.Framework.IO.Stores
         }
 
         private Task fontLoadTask;
+        private GlyphStore asciiHighDefinitionStore;
+
+        /// <summary>
+        /// Texture resolution multiplier for a printable ASCII glyph. Layout metrics remain those of the original font.
+        /// </summary>
+        public float GetTextureScale(char character)
+        {
+            if (character < ' ' || character > '~' || asciiHighDefinitionStore?.HasGlyph(character) != true)
+                return 1;
+
+            return (float)asciiHighDefinitionStore.Font.Common.LineHeight / Font.Common.LineHeight;
+        }
 
         public Task LoadFontAsync() => fontLoadTask ??= Task.Factory.StartNew(() =>
         {
@@ -88,6 +100,29 @@ namespace osu.Framework.IO.Stores
                     else
                     {
                         font_cache.TryAdd(hash, font = BitmapFont.FromStream(s, FormatHint.Binary, false));
+                    }
+                }
+
+                // A companion bitmap font is optional. It must be generated from the same face at a higher resolution.
+                // Probe before loading so existing fonts do not incur missing-resource errors.
+                using (var highDefinition = Store.GetStream($"{AssetName}-ASCII-HD"))
+                {
+                    if (highDefinition != null)
+                    {
+                        var candidate = new GlyphStore(Store, $"{AssetName}-ASCII-HD", TextureLoader);
+                        try
+                        {
+                            candidate.LoadFontAsync().GetAwaiter().GetResult();
+                            if (candidate.Font.Common.LineHeight > font.Common.LineHeight)
+                                asciiHighDefinitionStore = candidate;
+                            else
+                                candidate.Dispose();
+                        }
+                        catch
+                        {
+                            candidate.Dispose();
+                            // A broken optional companion must not prevent loading the original font.
+                        }
                     }
                 }
 
@@ -144,7 +179,11 @@ namespace osu.Framework.IO.Stores
             if (name.Length > 1 && !name.StartsWith($@"{FontName}/", StringComparison.Ordinal))
                 return null;
 
-            return Font.Characters.TryGetValue(name.Last(), out Character c) ? LoadCharacter(c) : null;
+            char character = name.Last();
+            if (GetTextureScale(character) > 1)
+                return asciiHighDefinitionStore.Get(character.ToString());
+
+            return Font.Characters.TryGetValue(character, out Character c) ? LoadCharacter(c) : null;
         }
 
         public virtual async Task<TextureUpload> GetAsync(string name, CancellationToken cancellationToken = default)
@@ -154,7 +193,11 @@ namespace osu.Framework.IO.Stores
 
             var bmFont = await completionSource.Task.ConfigureAwait(false);
 
-            return bmFont.Characters.TryGetValue(name.Last(), out Character c)
+            char character = name.Last();
+            if (GetTextureScale(character) > 1)
+                return await asciiHighDefinitionStore.GetAsync(character.ToString(), cancellationToken).ConfigureAwait(false);
+
+            return bmFont.Characters.TryGetValue(character, out Character c)
                 ? LoadCharacter(c)
                 : null;
         }
@@ -199,6 +242,8 @@ namespace osu.Framework.IO.Stores
 
         protected virtual void Dispose(bool disposing)
         {
+            if (disposing)
+                asciiHighDefinitionStore?.Dispose();
         }
 
         #endregion

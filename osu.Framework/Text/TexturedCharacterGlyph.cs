@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System.Runtime.CompilerServices;
 using osu.Framework.Graphics.Textures;
@@ -15,8 +15,8 @@ namespace osu.Framework.Text
         public float XAdvance => glyph.XAdvance * Scale;
         public float Baseline => glyph.Baseline * Scale;
         public char Character => glyph.Character;
-        public float Width => Texture.Width * Scale;
-        public float Height => Texture.Height * Scale;
+        public float Width => Texture.Width * Scale / textureScale;
+        public float Height => Texture.Height * Scale / textureScale;
 
         /// <summary>
         /// An adjustment factor in scale. This is applied to all other returned metric properties.
@@ -24,6 +24,7 @@ namespace osu.Framework.Text
         public readonly float Scale;
 
         private readonly CharacterGlyph glyph;
+        private readonly float textureScale;
 
         /// <summary>
         /// Create a new <see cref="TexturedCharacterGlyph"/> instance.
@@ -31,9 +32,11 @@ namespace osu.Framework.Text
         /// <param name="glyph">The glyph.</param>
         /// <param name="texture">The texture.</param>
         /// <param name="scale">A scale factor to apply to exposed glyph metrics.</param>
-        public TexturedCharacterGlyph(CharacterGlyph glyph, Texture texture, float scale = 1)
+        /// <param name="textureScale">Texture resolution relative to the original glyph metrics.</param>
+        public TexturedCharacterGlyph(CharacterGlyph glyph, Texture texture, float scale = 1, float textureScale = 1)
         {
             this.glyph = glyph;
+            this.textureScale = textureScale;
             Scale = scale;
             Texture = texture;
         }
