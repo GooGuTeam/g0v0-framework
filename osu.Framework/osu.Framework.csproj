@@ -30,7 +30,8 @@ Full licence text: see LICENCE and LICENCE-OSU.</PackageReleaseNotes>
     <PackageReference Include="ppy.ManagedBass.Fx" Version="2022.1216.0" />
     <PackageReference Include="ppy.ManagedBass.Mix" Version="2022.1216.0" />
     <PackageReference Include="ppy.ManagedBass.Wasapi" Version="2022.1216.0" />
-    <PackageReference Include="ppy.Veldrid" Version="4.9.69-ga405fe8484" />
+    <PackageReference Include="ppy.Veldrid" Version="4.9.69-ga405fe8484" Condition="'$(UseLocalVeldrid)' != 'true'" />
+    <ProjectReference Include="..\..\veldrid\src\Veldrid\Veldrid.csproj" Condition="'$(UseLocalVeldrid)' == 'true'" />
     <PackageReference Include="ppy.Veldrid.SPIRV" Version="1.0.15-g5911265ec3" />
     <PackageReference Include="SharpFNT" Version="2.0.0" />
     <!-- Held back due to licencing concerns. Silenced vulnerabilities have been mitigated. -->

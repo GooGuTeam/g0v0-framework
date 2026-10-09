@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -127,7 +127,8 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
             //
             // Except we are using a staging texture pool to avoid the alloc overhead of each staging texture.
             var staging = stagingPool.Get(width, height, texture.Format);
-            device.Device.UpdateTexture(staging, data, 0, 0, 0, (uint)width, (uint)height, 1, (uint)level, 0);
+            // The pooled staging texture has only one mip level, regardless of the destination level.
+            device.Device.UpdateTexture(staging, data, 0, 0, 0, (uint)width, (uint)height, 1, 0, 0);
             Commands.CopyTexture(staging, 0, 0, 0, 0, 0, texture, (uint)x, (uint)y, 0, (uint)level, 0, (uint)width, (uint)height, 1, 1);
         }
 
@@ -147,32 +148,47 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
         {
             var staging = stagingPool.Get(width, height, texture.Format);
 
-            unsafe
+            MappedResource mappedData = Device.Map(staging, MapMode.Write);
+
+            try
             {
-                MappedResource mappedData = Device.Map(staging, MapMode.Write);
-
-                try
-                {
-                    void* srcPtr = data.ToPointer();
-                    void* dstPtr = mappedData.Data.ToPointer();
-
-                    for (int i = 0; i < height; i++)
-                    {
-                        Unsafe.CopyBlockUnaligned(dstPtr, srcPtr, mappedData.RowPitch);
-
-                        srcPtr = Unsafe.Add<byte>(srcPtr, rowLengthInBytes);
-                        dstPtr = Unsafe.Add<byte>(dstPtr, (int)mappedData.RowPitch);
-                    }
-                }
-                finally
-                {
-                    Device.Unmap(staging);
-                }
+                CopyTextureRows(data, rowLengthInBytes, mappedData.Data, mappedData.RowPitch,
+                    checked((uint)width * FormatSizeHelpers.GetSizeInBytes(texture.Format)), height);
+            }
+            finally
+            {
+                Device.Unmap(staging);
             }
 
             Commands.CopyTexture(
                 staging, 0, 0, 0, 0, 0,
                 texture, (uint)x, (uint)y, 0, (uint)level, 0, (uint)width, (uint)height, 1, 1);
+        }
+
+        /// <summary>
+        /// Copies only the pixel data of each row, leaving destination padding untouched.
+        /// Source and destination strides are independent; video frames may also have a negative source stride.
+        /// </summary>
+        internal static unsafe void CopyTextureRows(IntPtr source, int sourceStride, IntPtr destination, uint destinationStride, uint rowSizeInBytes, int height)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(height);
+
+            if (Math.Abs((long)sourceStride) < rowSizeInBytes)
+                throw new ArgumentOutOfRangeException(nameof(sourceStride));
+
+            ArgumentOutOfRangeException.ThrowIfLessThan(destinationStride, rowSizeInBytes);
+
+            byte* src = (byte*)source;
+            byte* dst = (byte*)destination;
+
+            for (int i = 0; i < height; i++)
+            {
+                // A Vulkan driver may align rows beyond the source stride. Pooled textures may also be
+                // wider than the upload. Neither is a reason to read or write beyond the actual pixel row.
+                Unsafe.CopyBlockUnaligned(dst, src, rowSizeInBytes);
+                src += sourceStride;
+                dst += destinationStride;
+            }
         }
 
         /// <summary>

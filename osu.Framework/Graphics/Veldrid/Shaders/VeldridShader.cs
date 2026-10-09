@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -106,7 +106,11 @@ namespace osu.Framework.Graphics.Veldrid.Shaders
 
             // some attributes from the vertex output may not be used by the fragment shader, but that could break some renderers (e.g. D3D11).
             // therefore include any unused vertex output to a fragment shader as fragment input & output.
-            fragment = fragment.WithPassthroughInput(vertex.Outputs);
+            // Vulkan permits unused vertex outputs. Synthesising fragment outputs only adds unused
+            // colour attachments to the shader interface and triggers validation warnings.
+            fragment = fragment.WithPassthroughInput(renderer.SurfaceType == GraphicsSurfaceType.Vulkan
+                ? Array.Empty<VeldridShaderAttribute>()
+                : vertex.Outputs);
 
             try
             {
