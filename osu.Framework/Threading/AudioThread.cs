@@ -15,6 +15,7 @@ using osu.Framework.Development;
 using osu.Framework.Logging;
 using osu.Framework.Platform.Linux.Native;
 using ManagedBass.Fx;
+using osu.Framework.Audio.Callbacks;
 
 namespace osu.Framework.Threading
 {
@@ -116,6 +117,8 @@ namespace osu.Framework.Threading
             // See https://github.com/ppy/osu-framework/pull/3378 for further discussion.
             foreach (int d in initialised_devices.ToArray())
                 FreeDevice(d);
+
+            WasapiNativeBridge.Free();
         }
 
         #region BASS Initialisation
@@ -234,15 +237,6 @@ namespace osu.Framework.Threading
 
         private bool initWasapi(int wasapiDevice, bool isExclusive, double buffer, double period)
         {
-            // This is intentionally initialised inline and stored to a field.
-            // If we don't do this, it gets GC'd away.
-            wasapiProcedure = (buffer, length, _) =>
-            {
-                if (globalMixerHandle.Value == null)
-                    return 0;
-
-                return Bass.ChannelGetData(globalMixerHandle.Value!.Value, buffer, length);
-            };
             wasapiNotifyProcedure = (notify, device, _) => Scheduler.Add(() =>
             {
                 if (notify == WasapiNotificationType.DefaultOutput)
@@ -258,28 +252,77 @@ namespace osu.Framework.Threading
             if (period < 1e-5)
                 v = isExclusive ? 0f : float.Epsilon;
 
-            bool initialised = BassWasapi.Init(
-                wasapiDevice,
-                Procedure: wasapiProcedure,
-                Flags: WasapiInitFlags.EventDriven | WasapiInitFlags.AutoFormat | (isExclusive ? WasapiInitFlags.Exclusive : 0),
-                Buffer: (float)buffer,
-                Period: v
-            );
+            var flags = WasapiInitFlags.EventDriven | WasapiInitFlags.AutoFormat | (isExclusive ? WasapiInitFlags.Exclusive : 0);
 
-            Logger.Log($"Initialising BassWasapi for device {wasapiDevice}...{(initialised ? "success!" : $"FAILED ({Bass.LastError})")}");
+            bool initialised;
 
-            if (!initialised && isExclusive)
+            if (WasapiNativeBridge.TryGetNativeProcedure(out IntPtr nativeProc, out IntPtr userContext))
             {
-                Logger.Log($"Initialising BassWasapi in exclusive mode failed ({Bass.LastError}), retrying in shared mode...", level: LogLevel.Important);
-                freeWasapi();
+                initialised = BassWasapi.InitEx(
+                    wasapiDevice,
+                    Frequency: 0,
+                    Channels: 0,
+                    Flags: flags,
+                    Buffer: (float)buffer,
+                    Period: v,
+                    Procedure: nativeProc,
+                    User: userContext
+                );
+
+                Logger.Log($"Initialising BassWasapi for device {wasapiDevice} (native callback: {WasapiNativeBridge.ProviderName})...{(initialised ? "success!" : $"FAILED ({Bass.LastError})")}");
+
+                if (!initialised && isExclusive)
+                {
+                    Logger.Log($"Initialising BassWasapi in exclusive mode failed ({Bass.LastError}), retrying in shared mode...", level: LogLevel.Important);
+                    freeWasapi();
+
+                    initialised = BassWasapi.InitEx(
+                        wasapiDevice,
+                        Frequency: 0,
+                        Channels: 0,
+                        Flags: WasapiInitFlags.EventDriven | WasapiInitFlags.AutoFormat,
+                        Buffer: 0f,
+                        Period: float.Epsilon,
+                        Procedure: nativeProc,
+                        User: userContext
+                    );
+                }
+            }
+            else
+            {
+                // This is intentionally initialised inline and stored to a field.
+                // If we don't do this, it gets GC'd away.
+                wasapiProcedure = (b, length, _) =>
+                {
+                    if (globalMixerHandle.Value == null)
+                        return 0;
+
+                    return Bass.ChannelGetData(globalMixerHandle.Value!.Value, b, length);
+                };
 
                 initialised = BassWasapi.Init(
                     wasapiDevice,
                     Procedure: wasapiProcedure,
-                    Flags: WasapiInitFlags.EventDriven | WasapiInitFlags.AutoFormat,
-                    Buffer: 0f,
-                    Period: float.Epsilon
+                    Flags: flags,
+                    Buffer: (float)buffer,
+                    Period: v
                 );
+
+                Logger.Log($"Initialising BassWasapi for device {wasapiDevice} (managed callback fallback)...{(initialised ? "success!" : $"FAILED ({Bass.LastError})")}");
+
+                if (!initialised && isExclusive)
+                {
+                    Logger.Log($"Initialising BassWasapi in exclusive mode failed ({Bass.LastError}), retrying in shared mode...", level: LogLevel.Important);
+                    freeWasapi();
+
+                    initialised = BassWasapi.Init(
+                        wasapiDevice,
+                        Procedure: wasapiProcedure,
+                        Flags: WasapiInitFlags.EventDriven | WasapiInitFlags.AutoFormat,
+                        Buffer: 0f,
+                        Period: float.Epsilon
+                    );
+                }
             }
 
             if (!initialised)
@@ -287,6 +330,7 @@ namespace osu.Framework.Threading
 
             BassWasapi.GetInfo(out var wasapiInfo);
             globalMixerHandle.Value = BassMix.CreateMixerStream(wasapiInfo.Frequency, wasapiInfo.Channels, BassFlags.MixerNonStop | BassFlags.Decode | BassFlags.Float);
+            WasapiNativeBridge.SetMixerHandle(globalMixerHandle.Value.Value);
             BassWasapi.Start();
 
             BassWasapi.SetNotify(wasapiNotifyProcedure);
@@ -295,6 +339,8 @@ namespace osu.Framework.Threading
 
         private void freeWasapi()
         {
+            WasapiNativeBridge.Reset();
+
             if (globalMixerHandle.Value != null)
             {
                 // The mixer probably doesn't need to be recycled. Just keeping things sane for now.
