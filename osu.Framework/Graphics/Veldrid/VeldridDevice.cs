@@ -92,8 +92,10 @@ namespace osu.Framework.Graphics.Veldrid
         private Vector2I currentWindowSize;
 
         private readonly Direct3DPresentationMonitor? presentationMonitor;
+        private readonly VulkanPresentationMonitor? vulkanPresentationMonitor;
 
         public Direct3DPresentationStatus? PresentationStatus => presentationMonitor?.Status;
+        public VulkanPresentationStatus? VulkanPresentationStatus => vulkanPresentationMonitor?.Status;
 
         /// <summary>
         /// Creates a new <see cref="VeldridDevice"/>
@@ -114,6 +116,8 @@ namespace osu.Framework.Graphics.Veldrid
                 SwapchainDepthFormat = PixelFormat.R16UNorm,
                 SyncToVerticalBlank = true,
                 ResourceBindingModel = ResourceBindingModel.Improved,
+                LowLatency = true,
+                FullScreenExclusive = RuntimeInfo.OS == RuntimeInfo.Platform.Windows,
             };
 
             var size = this.graphicsSurface.GetDrawableSize();
@@ -203,6 +207,7 @@ namespace osu.Framework.Graphics.Veldrid
                 case GraphicsSurfaceType.Vulkan:
                     Device = GraphicsDevice.CreateVulkan(options, swapchain);
                     Device.LogVulkan(out maxTextureSize);
+                    vulkanPresentationMonitor = new VulkanPresentationMonitor(Device.MainSwapchain);
                     break;
 
                 case GraphicsSurfaceType.Direct3D11:
@@ -249,6 +254,7 @@ namespace osu.Framework.Graphics.Veldrid
         {
             Device.SwapBuffers();
             presentationMonitor?.Update();
+            vulkanPresentationMonitor?.Update();
         }
 
         /// <summary>

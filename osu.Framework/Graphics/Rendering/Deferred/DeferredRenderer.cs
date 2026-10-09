@@ -23,10 +23,11 @@ using Texture = Veldrid.Texture;
 
 namespace osu.Framework.Graphics.Rendering.Deferred
 {
-    internal class DeferredRenderer : Renderer, IVeldridRenderer, IDirect3DRenderer
+    internal class DeferredRenderer : Renderer, IVeldridRenderer, IDirect3DRenderer, IVulkanRenderer
     {
         public VeldridDevice VeldridDevice { get; private set; } = null!;
         public Direct3DPresentationStatus? PresentationStatus => VeldridDevice.PresentationStatus;
+        VulkanPresentationStatus? IVulkanRenderer.PresentationStatus => VeldridDevice.VulkanPresentationStatus;
 
         public DeferredContext Context { get; private set; } = null!;
         public GraphicsPipeline Graphics { get; private set; } = null!;

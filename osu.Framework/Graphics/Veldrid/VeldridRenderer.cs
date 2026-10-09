@@ -26,7 +26,7 @@ using PrimitiveTopology = osu.Framework.Graphics.Rendering.PrimitiveTopology;
 
 namespace osu.Framework.Graphics.Veldrid
 {
-    internal class VeldridRenderer : Renderer, IVeldridRenderer, IDirect3DRenderer
+    internal class VeldridRenderer : Renderer, IVeldridRenderer, IDirect3DRenderer, IVulkanRenderer
     {
         protected internal override bool VerticalSync
         {
@@ -62,6 +62,7 @@ namespace osu.Framework.Graphics.Veldrid
             => veldridDevice.SurfaceType;
 
         public Direct3DPresentationStatus? PresentationStatus => veldridDevice.PresentationStatus;
+        VulkanPresentationStatus? IVulkanRenderer.PresentationStatus => veldridDevice.VulkanPresentationStatus;
 
         private readonly HashSet<IVeldridUniformBuffer> uniformBufferResetList = new HashSet<IVeldridUniformBuffer>();
 
