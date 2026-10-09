@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -26,7 +26,7 @@ using PrimitiveTopology = osu.Framework.Graphics.Rendering.PrimitiveTopology;
 
 namespace osu.Framework.Graphics.Veldrid
 {
-    internal class VeldridRenderer : Renderer, IVeldridRenderer
+    internal class VeldridRenderer : Renderer, IVeldridRenderer, IDirect3DRenderer
     {
         protected internal override bool VerticalSync
         {
@@ -60,6 +60,8 @@ namespace osu.Framework.Graphics.Veldrid
 
         public GraphicsSurfaceType SurfaceType
             => veldridDevice.SurfaceType;
+
+        public Direct3DPresentationStatus? PresentationStatus => veldridDevice.PresentationStatus;
 
         private readonly HashSet<IVeldridUniformBuffer> uniformBufferResetList = new HashSet<IVeldridUniformBuffer>();
 

@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Diagnostics;
@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using osu.Framework.Development;
 using osu.Framework.Graphics.Primitives;
+using osu.Framework.Graphics.Rendering;
 using osu.Framework.Logging;
 using osu.Framework.Platform;
 using SixLabors.ImageSharp;
@@ -89,6 +90,10 @@ namespace osu.Framework.Graphics.Veldrid
 
         private readonly IGraphicsSurface graphicsSurface;
         private Vector2I currentWindowSize;
+
+        private readonly Direct3DPresentationMonitor? presentationMonitor;
+
+        public Direct3DPresentationStatus? PresentationStatus => presentationMonitor?.Status;
 
         /// <summary>
         /// Creates a new <see cref="VeldridDevice"/>
@@ -203,6 +208,7 @@ namespace osu.Framework.Graphics.Veldrid
                 case GraphicsSurfaceType.Direct3D11:
                     Device = GraphicsDevice.CreateD3D11(options, swapchain);
                     Device.LogD3D11(out maxTextureSize);
+                    presentationMonitor = new Direct3DPresentationMonitor(Device.MainSwapchain);
                     break;
 
                 case GraphicsSurfaceType.Metal:
@@ -217,6 +223,10 @@ namespace osu.Framework.Graphics.Veldrid
             Logger.Log($"{nameof(UseStructuredBuffers)}: {UseStructuredBuffers}");
 
             MaxTextureSize = maxTextureSize;
+
+            // The main swapchain was already created at this size. Avoid destroying and rebuilding
+            // it on the first frame (including a device-idle wait on Vulkan).
+            currentWindowSize = new Vector2I(size.Width, size.Height);
         }
 
         /// <summary>
@@ -236,7 +246,10 @@ namespace osu.Framework.Graphics.Veldrid
         /// Swaps the back buffer with the front buffer to display the new frame.
         /// </summary>
         public void SwapBuffers()
-            => Device.SwapBuffers();
+        {
+            Device.SwapBuffers();
+            presentationMonitor?.Update();
+        }
 
         /// <summary>
         /// Waits until all renderer commands have been fully executed GPU-side, as signaled by the graphics backend.
