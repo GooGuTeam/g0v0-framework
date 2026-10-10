@@ -116,8 +116,6 @@ namespace osu.Framework.Graphics.Veldrid
                 SwapchainDepthFormat = PixelFormat.R16UNorm,
                 SyncToVerticalBlank = true,
                 ResourceBindingModel = ResourceBindingModel.Improved,
-                LowLatency = true,
-                FullScreenExclusive = RuntimeInfo.OS == RuntimeInfo.Platform.Windows,
             };
 
             var size = this.graphicsSurface.GetDrawableSize();
