@@ -302,6 +302,10 @@ namespace osu.Framework.Threading
                 globalMixerHandle.Value = null;
             }
 
+            // BassWasapi is a Windows-only native dependency; touching it on other platforms would throw DllNotFoundException.
+            if (RuntimeInfo.OS != RuntimeInfo.Platform.Windows)
+                return;
+
             BassWasapi.Stop();
             BassWasapi.Free();
         }
