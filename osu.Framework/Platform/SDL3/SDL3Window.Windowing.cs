@@ -617,7 +617,21 @@ namespace osu.Framework.Platform.SDL3
             }
             else
             {
-                windowState = SDL_GetWindowFlags(SDLWindowHandle).ToWindowState(SDL_GetWindowFullscreenMode(SDLWindowHandle) == null);
+                var flags = SDL_GetWindowFlags(SDLWindowHandle);
+
+                if ((flags & SDL_WindowFlags.SDL_WINDOW_MINIMIZED) != 0)
+                {
+                    windowState = WindowState.Minimised;
+                }
+                else if ((flags & SDL_WindowFlags.SDL_WINDOW_FULLSCREEN) != 0)
+                {
+                    if (windowState != WindowState.Fullscreen && windowState != WindowState.FullscreenBorderless)
+                        windowState = WindowMode.Value == Configuration.WindowMode.Fullscreen ? WindowState.Fullscreen : WindowState.FullscreenBorderless;
+                }
+                else
+                {
+                    windowState = flags.ToWindowState(false);
+                }
             }
 
             if (windowState != stateBefore)
@@ -726,7 +740,18 @@ namespace osu.Framework.Platform.SDL3
 
                     ensureWindowOnDisplay(display);
 
-                    SDL_SetWindowFullscreenMode(SDLWindowHandle, &closestMode).LogErrorIfFailed();
+                    bool isDesktopMode = (sizeFullscreen.Value.Width == 9999 && sizeFullscreen.Value.Height == 9999)
+                                         || (closestMode.w == display.Bounds.Width && closestMode.h == display.Bounds.Height && (closestMode.refresh_rate == 0 || displayMode.RefreshRate == 0 || Math.Abs(closestMode.refresh_rate - displayMode.RefreshRate) < 0.01f));
+
+                    if (isDesktopMode)
+                    {
+                        SDL_SetWindowFullscreenMode(SDLWindowHandle, null).LogErrorIfFailed();
+                    }
+                    else
+                    {
+                        SDL_SetWindowFullscreenMode(SDLWindowHandle, &closestMode).LogErrorIfFailed();
+                    }
+
                     SDL_SetWindowFullscreen(SDLWindowHandle, true).LogErrorIfFailed();
                     break;
 
@@ -758,7 +783,10 @@ namespace osu.Framework.Platform.SDL3
             }
 
             SDL_ClearError();
-            var mode = windowState == WindowState.Fullscreen ? SDL_GetWindowFullscreenMode(windowHandle) : SDL3Extensions.LogErrorIfFailed(SDL_GetDesktopDisplayMode(displayID));
+            var mode = windowState == WindowState.Fullscreen ? SDL_GetWindowFullscreenMode(windowHandle) : null;
+            if (mode == null)
+                mode = SDL3Extensions.LogErrorIfFailed(SDL_GetDesktopDisplayMode(displayID));
+
             string type = windowState == WindowState.Fullscreen ? "fullscreen" : "desktop";
 
             if (mode != null)
