@@ -7,6 +7,11 @@ permissions:
   security-events: write # for reporting InspectCode issues
 
 jobs:
+  recording-native:
+    uses: ./.github/workflows/build-recording-native.yml
+    permissions:
+      contents: read
+
   inspect-code:
     name: Code Quality
     runs-on: ubuntu-latest

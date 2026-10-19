@@ -43,6 +43,9 @@ namespace osu.Framework.Configuration
             SetDefault(FrameworkSetting.FrameSync, FrameSync.Limit2x);
             SetDefault(FrameworkSetting.WindowMode, WindowMode.Windowed);
             SetDefault(FrameworkSetting.Renderer, RendererType.Automatic);
+            SetDefault(FrameworkSetting.PresentationPreference, PresentationPreference.Automatic);
+            SetDefault(FrameworkSetting.VulkanPresentationPreference, VulkanPresentationPreference.Automatic);
+            SetDefault(FrameworkSetting.RequestVulkanExclusiveFullscreen, true);
             SetDefault(FrameworkSetting.ShowUnicode, false);
             SetDefault(FrameworkSetting.WasapiIsExclusive, false);
             SetDefault(FrameworkSetting.WasapiAutoSharedOnBackground, true);
@@ -111,6 +114,9 @@ namespace osu.Framework.Configuration
         MinimiseOnFocusLossInFullscreen,
 
         Renderer,
+        PresentationPreference,
+        VulkanPresentationPreference,
+        RequestVulkanExclusiveFullscreen,
         WindowMode,
         ConfineMouseMode,
         FrameSync,

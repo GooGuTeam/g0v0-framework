@@ -1,0 +1,27 @@
+﻿<Project>
+  <PropertyGroup>
+    <RecordingNativeDirectory Condition="'$(RecordingNativeDirectory)' == ''">$(MSBuildThisFileDirectory)artifacts/win-x64</RecordingNativeDirectory>
+    <BuildRecordingNative Condition="'$(BuildRecordingNative)' == ''">false</BuildRecordingNative>
+    <PackRecordingNative Condition="'$(PackRecordingNative)' == ''">false</PackRecordingNative>
+    <RecordingNativeDownloadToolchain Condition="'$(RecordingNativeDownloadToolchain)' == ''">false</RecordingNativeDownloadToolchain>
+    <_RecordingDownloadArgument Condition="'$(RecordingNativeDownloadToolchain)' == 'true'">-DownloadToolchain</_RecordingDownloadArgument>
+    <_RecordingZigArgument Condition="'$(RecordingZig)' != ''">-Zig &quot;$(RecordingZig)&quot;</_RecordingZigArgument>
+    <_RecordingHeadersArgument Condition="'$(RecordingVulkanHeaders)' != ''">-VulkanHeaders &quot;$(RecordingVulkanHeaders)&quot;</_RecordingHeadersArgument>
+    <_RecordingDesktopX64 Condition="'$(OS)' == 'Windows_NT' and ('$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == 'win-x64') and '$(PlatformTarget)' != 'x86' and '$(PlatformTarget)' != 'ARM64' and '$(TargetPlatformIdentifier)' != 'android' and '$(TargetPlatformIdentifier)' != 'ios'">true</_RecordingDesktopX64>
+  </PropertyGroup>
+  <Target Name="BuildRecordingLibraries" BeforeTargets="PrepareForBuild" Condition="'$(BuildRecordingNative)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+    <Error Condition="'$(OS)' != 'Windows_NT'" Text="BuildRecordingNative requires Windows. Use downloaded CI artifacts for cross-platform packing." />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)build-recording.ps1&quot; $(_RecordingZigArgument) $(_RecordingHeadersArgument) $(_RecordingDownloadArgument) -OutputDirectory &quot;$(RecordingNativeDirectory)&quot;" />
+  </Target>
+  <ItemGroup Condition="'$(_RecordingDesktopX64)' == 'true' and ('$(BuildRecordingNative)' == 'true' or Exists('$(RecordingNativeDirectory)/g0v0-gpu-video.dll'))">
+    <Content Include="$(RecordingNativeDirectory)/g0v0-gpu-video.dll;$(RecordingNativeDirectory)/g0v0-wasapi-capture.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="false" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(PackRecordingNative)' == 'true'">
+    <Content Update="$(RecordingNativeDirectory)/g0v0-gpu-video.dll;$(RecordingNativeDirectory)/g0v0-wasapi-capture.dll" Pack="true" PackagePath="runtimes/win-x64/native/" />
+    <None Include="$(RecordingNativeDirectory)/g0v0-gpu-video.dll;$(RecordingNativeDirectory)/g0v0-wasapi-capture.dll" Condition="'$(_RecordingDesktopX64)' != 'true'" Pack="true" PackagePath="runtimes/win-x64/native/" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)g0v0.Framework.targets" Pack="true" PackagePath="buildTransitive/g0v0.Framework.targets" Visible="false" />
+  </ItemGroup>
+  <Target Name="ValidateRecordingPackage" BeforeTargets="GenerateNuspec" Condition="'$(PackRecordingNative)' == 'true'">
+    <Error Condition="!Exists('$(RecordingNativeDirectory)/g0v0-gpu-video.dll') or !Exists('$(RecordingNativeDirectory)/g0v0-wasapi-capture.dll')" Text="Native recording DLLs are missing. Build or download the win-x64 native artifact before packing." />
+  </Target>
+</Project>

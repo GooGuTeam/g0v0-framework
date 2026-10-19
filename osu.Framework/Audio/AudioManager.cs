@@ -57,6 +57,20 @@ namespace osu.Framework.Audio
         /// The thread audio operations (mainly Bass calls) are ran on.
         /// </summary>
         private readonly AudioThread thread;
+        private readonly BassAudioMixer offlineMaster;
+        internal readonly osu.Framework.Audio.Callbacks.MixerAudioCaptureHub CaptureHub = new osu.Framework.Audio.Callbacks.MixerAudioCaptureHub();
+
+        /// <summary>
+        /// Starts single-consumer capture of this manager's live mixers. The capture survives
+        /// output-device changes; unavailable audio is represented by silence.
+        /// </summary>
+        public osu.Framework.Audio.Callbacks.MixerAudioCapture BeginCapture(long startTimestamp)
+        {
+            if (offlineMaster != null)
+                throw new InvalidOperationException(@"Use the private offline mixer for replay audio.");
+            ObjectDisposedException.ThrowIf(cancelSource.IsCancellationRequested, this);
+            return CaptureHub.Begin(startTimestamp);
+        }
 
         /// <summary>
         /// The global mixer which all tracks are routed into by default.
@@ -274,11 +288,37 @@ namespace osu.Framework.Audio
             }, 1000);
         }
 
+        /// <summary>
+        /// Creates a worker-owned manager whose stores feed a private pull-driven mixer.
+        /// The caller updates and disposes the manager on the offline audio thread.
+        /// </summary>
+        internal AudioManager(ResourceStore<byte[]> resources, BassAudioMixer mixer)
+        {
+            offlineMaster = mixer;
+            sampleByteStore = resources;
+            TrackMixer = SampleMixer = mixer;
+            globalTrackStore = new Lazy<TrackStore>(() =>
+            {
+                var store = new TrackStore(resources, mixer);
+                AddItem(store);
+                store.AddAdjustment(AdjustableProperty.Volume, VolumeTrack);
+                return store;
+            });
+            globalSampleStore = new Lazy<SampleStore>(() =>
+            {
+                var store = new SampleStore(resources, mixer);
+                AddItem(store);
+                store.AddAdjustment(AdjustableProperty.Volume, VolumeSample);
+                return store;
+            });
+        }
+
         protected override void Dispose(bool disposing)
         {
             cancelSource.Cancel();
+            CaptureHub.Current?.Dispose();
 
-            thread.UnregisterManager(this);
+            thread?.UnregisterManager(this);
 
             OnNewDevice = null;
             OnLostDevice = null;
@@ -300,8 +340,13 @@ namespace osu.Framework.Audio
 
         private AudioMixer createAudioMixer(AudioMixer fallbackMixer, string identifier)
         {
-            var mixer = new BassAudioMixer(this, fallbackMixer, identifier);
+            var mixer = new BassAudioMixer(this, fallbackMixer, identifier, offline: offlineMaster != null);
             AddItem(mixer);
+            if (offlineMaster != null)
+            {
+                if (!BassMix.MixerAddChannel(offlineMaster.Handle, mixer.Handle, BassFlags.MixerChanNoRampin))
+                    throw new InvalidOperationException($@"Unable to attach private audio mixer: {Bass.LastError}");
+            }
             return mixer;
         }
 
@@ -359,7 +404,11 @@ namespace osu.Framework.Audio
         /// <summary>
         /// (Re-)Initialises the audio engine and the current audio device.
         /// </summary>
-        public void RestartAudioEngine() => scheduler.AddOnce(restartAudioEngine);
+        public void RestartAudioEngine()
+        {
+            if (offlineMaster == null)
+                scheduler.AddOnce(restartAudioEngine);
+        }
 
         private void restartAudioEngine()
         {

@@ -30,9 +30,8 @@ Full licence text: see LICENCE and LICENCE-OSU.</PackageReleaseNotes>
     <PackageReference Include="ppy.ManagedBass.Fx" Version="2022.1216.0" />
     <PackageReference Include="ppy.ManagedBass.Mix" Version="2022.1216.0" />
     <PackageReference Include="ppy.ManagedBass.Wasapi" Version="2022.1216.0" />
-    <PackageReference Include="ppy.Veldrid" Version="4.9.69-ga405fe8484" Condition="'$(UseLocalVeldrid)' != 'true'" />
-    <ProjectReference Include="..\..\veldrid\src\Veldrid\Veldrid.csproj" Condition="'$(UseLocalVeldrid)' == 'true'" />
-    <PackageReference Include="ppy.Veldrid.SPIRV" Version="1.0.15-g5911265ec3" />
+    <PackageReference Include="g0v0.Veldrid" Version="4.9.0-g0v0.2" />
+    <PackageReference Include="g0v0.Veldrid.SPIRV" Version="4.9.0-g0v0.2" />
     <PackageReference Include="SharpFNT" Version="2.0.0" />
     <!-- Held back due to licencing concerns. Silenced vulnerabilities have been mitigated. -->
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11">
@@ -61,4 +60,5 @@ Full licence text: see LICENCE and LICENCE-OSU.</PackageReleaseNotes>
     <PackageReference Include="Markdig" Version="0.23.0" />
     <PackageReference Include="System.Numerics.Tensors" Version="10.0.11" />
   </ItemGroup>
+  <Import Project="../native/RecordingNative.targets" />
 </Project>

@@ -26,12 +26,24 @@ using PrimitiveTopology = osu.Framework.Graphics.Rendering.PrimitiveTopology;
 
 namespace osu.Framework.Graphics.Veldrid
 {
-    internal class VeldridRenderer : Renderer, IVeldridRenderer, IDirect3DRenderer, IVulkanRenderer
+    internal class VeldridRenderer : Renderer, IVeldridRenderer, IDirect3DRenderer, IVulkanRenderer, IGpuFrameCaptureRenderer
     {
         protected internal override bool VerticalSync
         {
             get => veldridDevice.VerticalSync;
             set => veldridDevice.VerticalSync = value;
+        }
+
+        internal override double FullscreenRefreshRate
+        {
+            get => veldridDevice.FullscreenRefreshRate;
+            set => veldridDevice.FullscreenRefreshRate = value;
+        }
+
+        internal override bool ExclusiveFullscreenAllowed
+        {
+            get => veldridDevice.ExclusiveFullscreenAllowed;
+            set => veldridDevice.ExclusiveFullscreenAllowed = value;
         }
 
         protected internal override bool AllowTearing
@@ -64,6 +76,8 @@ namespace osu.Framework.Graphics.Veldrid
         public Direct3DPresentationStatus? PresentationStatus => veldridDevice.PresentationStatus;
         VulkanPresentationStatus? IVulkanRenderer.PresentationStatus => veldridDevice.VulkanPresentationStatus;
 
+        public GpuFrameCaptureSession StartGpuFrameCapture(int capacity = 3) => veldridDevice.StartGpuFrameCapture(capacity);
+
         private readonly HashSet<IVeldridUniformBuffer> uniformBufferResetList = new HashSet<IVeldridUniformBuffer>();
 
         private VeldridDevice veldridDevice = null!;
@@ -78,7 +92,31 @@ namespace osu.Framework.Graphics.Veldrid
 
         protected override void Initialise(IGraphicsSurface graphicsSurface)
         {
-            veldridDevice = new VeldridDevice(graphicsSurface);
+            initialiseDevice(new VeldridDevice(graphicsSurface, PresentationPreference, VulkanPresentationPreference, RequestVulkanExclusiveFullscreen));
+        }
+
+        internal void InitialiseOffline(uint width, uint height)
+        {
+            initialiseDevice(new VeldridDevice(width, height));
+            CompleteInitialisation();
+        }
+
+        internal void DisposeOffline()
+        {
+            WaitUntilIdle();
+            linearIndexBuffer?.Dispose();
+            quadIndexBuffer?.Dispose();
+            DrainDisposalsAfterGpuIdle();
+            graphicsPipeline.DisposeAfterGpuIdle();
+            bufferUpdatePipeline.DisposeAfterGpuIdle();
+            textureUploadPipeline.DisposeAfterGpuIdle();
+            stagingTexturePool.DisposeAfterGpuIdle();
+            veldridDevice.DisposeOffline();
+        }
+
+        private void initialiseDevice(VeldridDevice device)
+        {
+            veldridDevice = device;
             graphicsPipeline = new GraphicsPipeline(veldridDevice);
             bufferUpdatePipeline = new BasicPipeline(veldridDevice);
             textureUploadPipeline = new BasicPipeline(veldridDevice);

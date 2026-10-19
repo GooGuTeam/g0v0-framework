@@ -23,6 +23,7 @@ namespace osu.Framework.Graphics.Veldrid
         private readonly PropertyInfo? fseSupportedProperty;
         private readonly PropertyInfo? fseAcquiredProperty;
         private readonly PropertyInfo? imageCountProperty;
+        private readonly PropertyInfo? acquirePacingProperty;
 
         private readonly Stopwatch stopwatch = Stopwatch.StartNew();
         private double lastPollTime = -poll_interval;
@@ -39,7 +40,8 @@ namespace osu.Framework.Graphics.Veldrid
             presentModeProperty = swapchainType.GetProperty("CurrentPresentMode", BindingFlags.Instance | BindingFlags.Public);
             fseSupportedProperty = swapchainType.GetProperty("FullScreenExclusiveSupported", BindingFlags.Instance | BindingFlags.Public);
             fseAcquiredProperty = swapchainType.GetProperty("FullScreenExclusiveAcquired", BindingFlags.Instance | BindingFlags.Public);
-            imageCountProperty = swapchainType.GetProperty("ImageCount", BindingFlags.Instance | BindingFlags.Public);
+            imageCountProperty = swapchainType.GetProperty(@"ImageCount", BindingFlags.Instance | BindingFlags.Public);
+            acquirePacingProperty = swapchainType.GetProperty(@"AcquirePacingActive", BindingFlags.Instance | BindingFlags.Public);
         }
 
         public void Update()
@@ -54,11 +56,13 @@ namespace osu.Framework.Graphics.Veldrid
             bool? fseSupported = null;
             bool? exclusiveFullscreen = null;
             uint? imageCount = null;
+            bool? acquirePacing = null;
 
             try
             {
                 if (presentModeProperty != null)
                 {
+                    acquirePacing = acquirePacingProperty?.GetValue(swapchain) as bool?;
                     object? modeVal = presentModeProperty.GetValue(swapchain);
                     if (modeVal != null)
                     {
@@ -97,7 +101,10 @@ namespace osu.Framework.Graphics.Veldrid
                 }
             }
 
-            var newStatus = new VulkanPresentationStatus(mode, fseSupported, exclusiveFullscreen, imageCount);
+            var newStatus = new VulkanPresentationStatus(mode, fseSupported, exclusiveFullscreen, imageCount)
+            {
+                AcquirePacingActive = acquirePacing,
+            };
 
             if (newStatus != Status)
             {

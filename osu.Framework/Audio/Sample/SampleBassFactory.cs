@@ -1,6 +1,7 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
+using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using ManagedBass;
@@ -35,11 +36,13 @@ namespace osu.Framework.Audio.Sample
         private readonly BassAudioMixer mixer;
 
         private NativeMemoryTracker.NativeMemoryLease? memoryLease;
+        internal byte[] EncodedData { get; }
         private byte[]? data;
 
         public SampleBassFactory(byte[] data, string name, BassAudioMixer mixer)
         {
             this.data = data;
+            EncodedData = data;
             this.mixer = mixer;
 
             Name = name;
@@ -97,12 +100,7 @@ namespace osu.Framework.Audio.Sample
             memoryLease = NativeMemoryTracker.AddMemory(this, dataLength);
         }
 
-        public Sample CreateSample() => new SampleBass(this, mixer) { OnPlay = onPlay };
-
-        private void onPlay(Sample sample)
-        {
-            AddItem(sample);
-        }
+        public Sample CreateSample() => new SampleBass(this, mixer) { OnPlay = AddItem };
 
         ~SampleBassFactory()
         {

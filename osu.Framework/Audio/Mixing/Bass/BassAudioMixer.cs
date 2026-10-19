@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -7,6 +7,8 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using ManagedBass;
 using ManagedBass.Mix;
+using osu.Framework.Audio.Callbacks;
+using osu.Framework.Logging;
 using osu.Framework.Extensions.EnumExtensions;
 using osu.Framework.Statistics;
 
@@ -29,9 +31,12 @@ namespace osu.Framework.Audio.Mixing.Bass
         /// </summary>
         private readonly List<IBassAudioChannel> activeChannels = new List<IBassAudioChannel>();
 
-        private readonly Dictionary<IEffectParameter, int> activeEffects = new Dictionary<IEffectParameter, int>();
+        private readonly Dictionary<IEffectParameter, (int Handle, int Priority)> activeEffects = new Dictionary<IEffectParameter, (int, int)>();
 
         private const int frequency = 44100;
+        private readonly bool offline;
+        private MixerAudioCaptureSource? captureSource;
+        private int captureDsp;
 
         /// <summary>
         /// Creates a new <see cref="BassAudioMixer"/>.
@@ -39,10 +44,12 @@ namespace osu.Framework.Audio.Mixing.Bass
         /// <param name="manager">The game's audio manager.</param>
         /// <param name="fallbackMixer"><inheritdoc /></param>
         /// <param name="identifier">An identifier displayed on the audio mixer visualiser.</param>
-        public BassAudioMixer(AudioManager? manager, AudioMixer? fallbackMixer, string identifier)
+        /// <param name="offline">Create a private pull-driven float mixer without device playback.</param>
+        public BassAudioMixer(AudioManager? manager, AudioMixer? fallbackMixer, string identifier, bool offline = false)
             : base(fallbackMixer, identifier)
         {
             this.manager = manager;
+            this.offline = offline;
             EnqueueAction(createMixer);
         }
 
@@ -54,23 +61,23 @@ namespace osu.Framework.Audio.Mixing.Bass
             int handle = ManagedBass.Bass.ChannelSetFX(Handle, effect.FXType, priority);
             ManagedBass.Bass.FXSetParameters(handle, effect);
 
-            activeEffects[effect] = handle;
+            activeEffects[effect] = (handle, priority);
         });
 
         public override void RemoveEffect(IEffectParameter effect) => EnqueueAction(() =>
         {
-            if (!activeEffects.Remove(effect, out int handle))
+            if (!activeEffects.Remove(effect, out var state))
                 return;
 
-            ManagedBass.Bass.ChannelRemoveFX(Handle, handle);
+            ManagedBass.Bass.ChannelRemoveFX(Handle, state.Handle);
         });
 
         public override void UpdateEffect(IEffectParameter effect) => EnqueueAction(() =>
         {
-            if (!activeEffects.TryGetValue(effect, out int handle))
+            if (!activeEffects.TryGetValue(effect, out var state))
                 return;
 
-            ManagedBass.Bass.FXSetParameters(handle, effect);
+            ManagedBass.Bass.FXSetParameters(state.Handle, effect);
         });
 
         protected override void AddInternal(IAudioChannel channel)
@@ -284,18 +291,24 @@ namespace osu.Framework.Audio.Mixing.Bass
 
         private void createMixer()
         {
+            removeCapture();
             if (Handle != 0)
+            {
                 ManagedBass.Bass.StreamFree(Handle);
+                Handle = 0;
+            }
 
             // Make sure that bass is initialised before trying to create a mixer.
             // If not, this will be called again when the device is initialised via UpdateDevice().
             if (!ManagedBass.Bass.GetDeviceInfo(ManagedBass.Bass.CurrentDevice, out var deviceInfo) || !deviceInfo.IsInitialized)
                 return;
 
-            Handle = manager?.GlobalMixerHandle.Value != null
+            Handle = offline
+                ? BassMix.CreateMixerStream(48000, 2, BassFlags.MixerNonStop | BassFlags.Decode | BassFlags.Float)
+                : manager?.GlobalMixerHandle.Value != null
                 // The decode flag here is super important to maintain the lowest latency audio output.
-                ? BassMix.CreateMixerStream(frequency, 2, BassFlags.MixerNonStop | BassFlags.Decode)
-                : BassMix.CreateMixerStream(frequency, 2, BassFlags.MixerNonStop);
+                ? BassMix.CreateMixerStream(frequency, 2, BassFlags.MixerNonStop | BassFlags.Decode | BassFlags.Float)
+                : BassMix.CreateMixerStream(frequency, 2, BassFlags.MixerNonStop | BassFlags.Float);
 
             if (Handle == 0)
                 return;
@@ -303,16 +316,49 @@ namespace osu.Framework.Audio.Mixing.Bass
             // Lower latency is valued more for the time since we are not using complex DSP effects. Disable buffering on the mixer channel in order for data to be produced immediately.
             ManagedBass.Bass.ChannelSetAttribute(Handle, ChannelAttribute.Buffer, 0);
 
+            // Effect handles belong to the freed mixer. Restore both parameters and priority
+            // before the replacement mixer can be pulled by a playback callback.
+            foreach (var effect in new List<IEffectParameter>(activeEffects.Keys))
+            {
+                int priority = activeEffects[effect].Priority;
+                int handle = ManagedBass.Bass.ChannelSetFX(Handle, effect.FXType, priority);
+                if (handle == 0 || !ManagedBass.Bass.FXSetParameters(handle, effect))
+                    Logger.Log($@"Unable to restore mixer effect after device change: {ManagedBass.Bass.LastError}", level: LogLevel.Important);
+                activeEffects[effect] = (handle, priority);
+            }
+
             // Register all channels that were previously played prior to the mixer being loaded.
             var toAdd = activeChannels.ToArray();
             activeChannels.Clear();
             foreach (var channel in toAdd)
                 AddChannelToBassMix(channel);
 
-            if (manager?.GlobalMixerHandle.Value != null)
+            // WASAPI pulls the decode graph on its real-time callback. Never install a
+            // managed recording DSP there; capture the final output in the native bridge.
+            if (!offline && manager != null && manager.GlobalMixerHandle.Value == null)
+            {
+                try
+                {
+                    captureSource = manager.CaptureHub.AddSource();
+                    captureDsp = ManagedBass.Bass.ChannelSetDSP(Handle, captureSource.Capture, IntPtr.Zero, int.MinValue);
+                    if (captureDsp == 0)
+                        throw new InvalidOperationException($@"Unable to attach mixer capture: {ManagedBass.Bass.LastError}");
+                }
+                catch (Exception ex)
+                {
+                    removeCapture();
+                    Logger.Error(ex, @"Mixer audio capture is unavailable; recording will use silence for this mixer.");
+                }
+            }
+
+            if (!offline && manager?.GlobalMixerHandle.Value != null && !NativeWasapiCapture.IsConfigured)
+                Logger.Log(@"WASAPI playback retains its native low-latency path; recording audio is unavailable without the native PCM capture library.", level: LogLevel.Important);
+
+            if (!offline && manager?.GlobalMixerHandle.Value != null)
                 BassMix.MixerAddChannel(manager.GlobalMixerHandle.Value.Value, Handle, BassFlags.MixerChanBuffer | BassFlags.MixerChanNoRampin);
 
-            ManagedBass.Bass.ChannelPlay(Handle);
+            if (!offline)
+                ManagedBass.Bass.ChannelPlay(Handle);
         }
 
         /// <summary>
@@ -359,9 +405,21 @@ namespace osu.Framework.Audio.Mixing.Bass
                 ManagedBass.Bass.ChannelSetPosition(Handle, 0);
         }
 
+        private void removeCapture()
+        {
+            // Remove the DSP before releasing its queue or freeing/reusing the BASS handle.
+            if (captureDsp != 0 && Handle != 0)
+                ManagedBass.Bass.ChannelRemoveDSP(Handle, captureDsp);
+            captureDsp = 0;
+            if (captureSource != null)
+                manager?.CaptureHub.RemoveSource(captureSource);
+            captureSource = null;
+        }
+
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
+            removeCapture();
 
             // Move all contained channels back to the default mixer.
             foreach (var channel in activeChannels.ToArray())

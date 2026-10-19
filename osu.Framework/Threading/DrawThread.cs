@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using osu.Framework.Statistics;
 using System;
@@ -20,7 +20,7 @@ namespace osu.Framework.Threading
             this.host = host;
         }
 
-        public override bool IsCurrent => ThreadSafety.IsDrawThread;
+        public override bool IsCurrent => ThreadSafety.IsDrawThread && (Thread == null || System.Threading.Thread.CurrentThread == Thread);
 
         protected sealed override void OnInitialize()
         {

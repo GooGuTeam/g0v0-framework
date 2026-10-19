@@ -1,8 +1,9 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using OpenTabletDriver;
@@ -68,6 +69,10 @@ namespace osu.Framework.Input.Handlers.Tablet
 
             host.Window.Resized += () => updateOutputArea(host.Window);
             windowActive = host.Window.IsActive.GetBoundCopy();
+            windowActive.BindValueChanged(_ => resetFilters());
+            PositionSmoothing.BindValueChanged(_ => resetFilters());
+            ButtonDebounce.BindValueChanged(_ => resetFilters());
+            RadialSmoothingStrength.BindValueChanged(_ => resetFilters());
 
             AreaOffset.BindValueChanged(_ => updateTabletAndInputArea(device));
             AreaSize.BindValueChanged(_ => updateTabletAndInputArea(device));
@@ -78,6 +83,8 @@ namespace osu.Framework.Input.Handlers.Tablet
 
             Enabled.BindValueChanged(enabled =>
             {
+                resetFilters();
+                reportRate.Reset();
                 if (enabled.NewValue)
                 {
                     lastInitTask = Task.Run(() =>
@@ -111,7 +118,17 @@ namespace osu.Framework.Input.Handlers.Tablet
         void IAbsolutePointer.SetPosition(System.Numerics.Vector2 pos)
         {
             lastTabletDeviceType = TabletPenDeviceType.Unknown;
-            enqueueInput(new MousePositionAbsoluteInputFromPen { Position = new Vector2(pos.X, pos.Y), DeviceType = lastTabletDeviceType });
+            if (!float.IsFinite(pos.X) || !float.IsFinite(pos.Y))
+                return;
+            lock (filterSync)
+            {
+                if (!Enabled.Value || !windowActive.Value)
+                    return;
+                var position = filter.FilterPosition(new Vector2(pos.X, pos.Y), reportTime, PositionSmoothing.Value,
+                    millimetresPerPixel.X > 0 && millimetresPerPixel.Y > 0 ? RadialSmoothingStrength.Value : 0,
+                    millimetresPerPixel);
+                enqueueInput(new MousePositionAbsoluteInputFromPen { Position = position, DeviceType = lastTabletDeviceType });
+            }
         }
 
         void IRelativePointer.SetPosition(System.Numerics.Vector2 delta)
@@ -120,13 +137,89 @@ namespace osu.Framework.Input.Handlers.Tablet
             enqueueInput(new MousePositionRelativeInputFromPen { Delta = new Vector2(delta.X, delta.Y), DeviceType = lastTabletDeviceType });
         }
 
+        public BindableDouble PositionSmoothing { get; } = new BindableDouble { MinValue = 0, MaxValue = 20, Precision = 0.1 };
+        public BindableDouble ButtonDebounce { get; } = new BindableDouble { MinValue = 0, MaxValue = 30, Precision = 0.1 };
+
+        public BindableDouble RadialSmoothingStrength { get; } = new BindableDouble { MinValue = 0, MaxValue = 1, Precision = 0.01 };
+
+        private readonly TabletReportRate reportRate = new TabletReportRate();
+
+        /// <summary>
+        /// Pen reports received during the last second, with 10 ms bucket resolution.
+        /// </summary>
+        public int GetReportRate() => Enabled.Value && IsActive ? reportRate.Read() : 0;
+
+        private Vector2 millimetresPerPixel;
+
+        private readonly object filterSync = new object();
+        private readonly TabletInputFilter filter = new TabletInputFilter();
+        private static double reportTime => Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
+
+        public override void CollectPendingInputs(List<IInput> inputs)
+        {
+            lock (filterSync)
+            {
+                if (!Enabled.Value || !windowActive.Value)
+                {
+                    filter.Reset(emitButton);
+                    penPressed = false;
+                }
+                else
+                    filter.Flush(reportTime, ButtonDebounce.Value, emitButton);
+                base.CollectPendingInputs(inputs);
+            }
+        }
+
+        private void resetFilters()
+        {
+            lock (filterSync)
+            {
+                filter.Reset(emitButton);
+                penPressed = false;
+            }
+        }
+
+        private void emitButton(int key, bool pressed)
+        {
+            IInput input = key == -1
+                ? new MouseButtonInputFromPen(pressed) { DeviceType = lastTabletDeviceType }
+                : key < 256
+                    ? new TabletPenButtonInput((TabletPenButton)key, pressed)
+                    : new TabletAuxiliaryButtonInput((TabletAuxiliaryButton)(key - 256), pressed);
+            // Releases must reach the input manager even after focus loss or disconnection.
+            PendingInputs.Enqueue(input);
+        }
+
+        private void filterButton(int key, bool pressed)
+        {
+            lock (filterSync)
+            {
+                if (!Enabled.Value || !windowActive.Value)
+                    return;
+                double now = reportTime;
+                filter.SetButton(key, pressed, now);
+                filter.Flush(now, ButtonDebounce.Value, emitButton);
+            }
+        }
+
         private bool penPressed;
 
         void IPressureHandler.SetPressure(float pressure)
         {
+            lock (filterSync)
+            {
+                if (Enabled.Value && windowActive.Value)
+                    handlePressure(pressure);
+            }
+        }
+
+        private void handlePressure(float pressure)
+        {
             // Most important for edge cases where users have pressure set to 0 or 1 and tablets can report fuzzy data.
             const float hysteresis_half = 0.02f;
 
+            if (!float.IsFinite(pressure))
+                return;
             pressure = Math.Clamp(pressure, 0f, 1f);
 
             float releaseThreshold = PressureThreshold.Value - hysteresis_half;
@@ -151,6 +244,12 @@ namespace osu.Framework.Input.Handlers.Tablet
 
         private void handleTabletsChanged(object? sender, IEnumerable<TabletReference> tablets)
         {
+            lock (filterSync)
+            {
+                filter.Reset(emitButton);
+                penPressed = false;
+            }
+            reportRate.Reset();
             device = tablets.Any() ? tabletDriver?.InputDevices.First() : null;
 
             if (device != null)
@@ -177,14 +276,18 @@ namespace osu.Framework.Input.Handlers.Tablet
             if (pressed == penPressed)
                 return;
 
-            enqueueInput(new MouseButtonInputFromPen(pressed) { DeviceType = lastTabletDeviceType });
+            filterButton(-1, pressed);
             penPressed = pressed;
         }
 
         private void handleDeviceReported(object? sender, IDeviceReport report)
         {
             if (report is ITabletReport tabletReport)
+            {
+                if (Enabled.Value)
+                    reportRate.Record();
                 handleTabletReport(tabletReport);
+            }
 
             if (report is IAuxReport auxiliaryReport)
                 handleAuxiliaryReport(auxiliaryReport);
@@ -192,6 +295,7 @@ namespace osu.Framework.Input.Handlers.Tablet
 
         private void updateOutputArea(IWindow window)
         {
+            updateFilterMapping(window);
             if (device == null)
                 return;
 
@@ -238,6 +342,7 @@ namespace osu.Framework.Input.Handlers.Tablet
                 AreaOffset.SetDefault();
 
             tablet.Value = new TabletInfo(inputDevice.Properties.Name, AreaSize.Default);
+            updateFilterMapping(host.Window);
 
             switch (inputDevice.OutputMode)
             {
@@ -256,24 +361,31 @@ namespace osu.Framework.Input.Handlers.Tablet
             }
         }
 
+        private void updateFilterMapping(IWindow window)
+        {
+            lock (filterSync)
+            {
+                float width = window.ClientSize.Width * OutputAreaSize.Value.X;
+                float height = window.ClientSize.Height * OutputAreaSize.Value.Y;
+                millimetresPerPixel = width > 0 && height > 0
+                    ? new Vector2(AreaSize.Value.X / width, AreaSize.Value.Y / height)
+                    : Vector2.Zero;
+                if (!float.IsFinite(millimetresPerPixel.X) || !float.IsFinite(millimetresPerPixel.Y))
+                    millimetresPerPixel = Vector2.Zero;
+                filter.ResetPosition();
+            }
+        }
+
         private void handleTabletReport(ITabletReport tabletReport)
         {
-            int buttonCount = tabletReport.PenButtons.Length;
-            var buttons = new ButtonInputEntry<TabletPenButton>[buttonCount];
-            for (int i = 0; i < buttonCount; i++)
-                buttons[i] = new ButtonInputEntry<TabletPenButton>((TabletPenButton)i, tabletReport.PenButtons[i]);
-
-            enqueueInput(new TabletPenButtonInput(buttons));
+            for (int i = 0; i < Math.Min(256, tabletReport.PenButtons.Length); i++)
+                filterButton(i, tabletReport.PenButtons[i]);
         }
 
         private void handleAuxiliaryReport(IAuxReport auxiliaryReport)
         {
-            int buttonCount = auxiliaryReport.AuxButtons.Length;
-            var buttons = new ButtonInputEntry<TabletAuxiliaryButton>[buttonCount];
-            for (int i = 0; i < buttonCount; i++)
-                buttons[i] = new ButtonInputEntry<TabletAuxiliaryButton>((TabletAuxiliaryButton)i, auxiliaryReport.AuxButtons[i]);
-
-            enqueueInput(new TabletAuxiliaryButtonInput(buttons));
+            for (int i = 0; i < auxiliaryReport.AuxButtons.Length; i++)
+                filterButton(256 + i, auxiliaryReport.AuxButtons[i]);
         }
 
         private void enqueueInput(IInput input)

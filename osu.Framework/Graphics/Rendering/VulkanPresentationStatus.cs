@@ -10,5 +10,8 @@ namespace osu.Framework.Graphics.Rendering
         VulkanPresentMode? PresentMode,
         bool? FullScreenExclusiveSupported,
         bool? ExclusiveFullscreen,
-        uint? ImageCount);
+        uint? ImageCount)
+    {
+        public bool? AcquirePacingActive { get; init; }
+    }
 }
