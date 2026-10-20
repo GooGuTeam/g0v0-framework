@@ -9,21 +9,28 @@ using osu.Framework.Graphics.Shapes;
 using osu.Framework.Graphics.Sprites;
 using osu.Framework.Input.Events;
 using osu.Framework.Localisation;
+using osuTK;
 using osuTK.Graphics;
 
 namespace osu.Framework.Testing.Drawables.Steps
 {
     public abstract partial class StepButton : CompositeDrawable, IHasTooltip
     {
+        public const float ICON_SIZE = 12;
+        public const float INTERNAL_PADDING = 5;
+
         public required bool IsSetupStep { get; init; }
         public Action? Action { get; set; }
 
         public virtual int RequiredRepetitions => 1;
 
+        protected virtual IconUsage DefaultIcon => FontAwesome.Solid.Wrench;
+
         protected virtual Color4 IdleColour => new Color4(0.15f, 0.15f, 0.15f, 1);
         protected virtual Color4 RunningColour => new Color4(0.5f, 0.5f, 0.5f, 1);
 
         protected readonly Box Light;
+        protected readonly SpriteIcon SpriteIcon;
         protected readonly Box Background;
         protected readonly SpriteText SpriteText;
 
@@ -43,6 +50,14 @@ namespace osu.Framework.Testing.Drawables.Steps
                     RelativeSizeAxes = Axes.Y,
                     Width = 5,
                 },
+                SpriteIcon = new SpriteIcon
+                {
+                    Icon = DefaultIcon,
+                    Anchor = Anchor.CentreLeft,
+                    Origin = Anchor.CentreLeft,
+                    Size = new Vector2(ICON_SIZE),
+                    X = 5 + INTERNAL_PADDING,
+                },
                 SpriteText = new SpriteText
                 {
                     Truncate = true,
@@ -50,8 +65,8 @@ namespace osu.Framework.Testing.Drawables.Steps
                     Origin = Anchor.CentreLeft,
                     RelativeSizeAxes = Axes.X,
                     Font = FrameworkFont.Regular.With(size: 14),
-                    X = 5,
-                    Padding = new MarginPadding(5)
+                    X = 5 + INTERNAL_PADDING + ICON_SIZE,
+                    Padding = new MarginPadding(INTERNAL_PADDING)
                 }
             };
 
@@ -85,6 +100,10 @@ namespace osu.Framework.Testing.Drawables.Steps
         protected override void LoadComplete()
         {
             base.LoadComplete();
+
+            if (IsSetupStep)
+                SpriteIcon.Icon = FontAwesome.Solid.Wrench;
+
             Reset();
         }
 

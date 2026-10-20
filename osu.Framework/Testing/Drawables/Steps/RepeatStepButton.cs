@@ -2,6 +2,7 @@
 // See the LICENCE-OSU file in the repository root for full licence text.
 
 using System;
+using osu.Framework.Graphics.Sprites;
 
 namespace osu.Framework.Testing.Drawables.Steps
 {
@@ -10,6 +11,8 @@ namespace osu.Framework.Testing.Drawables.Steps
         public int Count { get; init; } = 1;
 
         public override int RequiredRepetitions => Count;
+
+        protected override IconUsage DefaultIcon => FontAwesome.Solid.Redo;
 
         private readonly string text = string.Empty;
         private int invocations;
