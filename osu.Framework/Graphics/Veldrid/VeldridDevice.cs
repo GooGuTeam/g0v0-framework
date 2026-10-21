@@ -39,7 +39,12 @@ namespace osu.Framework.Graphics.Veldrid
         /// The graphics surface type.
         /// </summary>
         public GraphicsSurfaceType SurfaceType
-            => graphicsSurface.Type;
+            => graphicsSurface?.Type ?? Device.BackendType switch
+            {
+                GraphicsBackend.Vulkan => GraphicsSurfaceType.Vulkan,
+                GraphicsBackend.Metal => GraphicsSurfaceType.Metal,
+                _ => GraphicsSurfaceType.Direct3D11,
+            };
 
         /// <summary>
         /// Enables or disables vertical sync.
@@ -53,6 +58,18 @@ namespace osu.Framework.Graphics.Veldrid
         /// <summary>
         /// Gets or sets whether the device should render new frames without waiting for previous ones to finish compositing.
         /// </summary>
+        public double FullscreenRefreshRate
+        {
+            get => Device.FullscreenRefreshRate;
+            set => Device.FullscreenRefreshRate = value;
+        }
+
+        public bool ExclusiveFullscreenAllowed
+        {
+            get => Device.ExclusiveFullscreenAllowed;
+            set => Device.ExclusiveFullscreenAllowed = value;
+        }
+
         public bool AllowTearing
         {
             get => Device.AllowTearing;
@@ -88,7 +105,62 @@ namespace osu.Framework.Graphics.Veldrid
         /// </summary>
         public int MaxTextureSize { get; }
 
-        private readonly IGraphicsSurface graphicsSurface;
+        private GpuFrameCaptureSession? captureSession;
+
+        public GpuFrameCaptureSession StartGpuFrameCapture(int capacity)
+        {
+            if (!ThreadSafety.IsDrawThread)
+                throw new InvalidOperationException("GPU capture must be started on the draw thread.");
+            if (captureSession is { IsDisposed: false })
+                throw new InvalidOperationException("A capture session is already active.");
+
+            if (Device.BackendType == GraphicsBackend.Vulkan)
+            {
+                if (!Device.GetVulkanInfo().SupportsFrameCapture)
+                    throw new NotSupportedException("The Vulkan surface does not support transfer-source capture.");
+            }
+
+            return captureSession = new GpuFrameCaptureSession(Device, capacity);
+        }
+
+        private readonly IGraphicsSurface? graphicsSurface;
+        private readonly Framebuffer? offlineFramebuffer;
+        internal Framebuffer DefaultFramebuffer => offlineFramebuffer ?? Device.SwapchainFramebuffer;
+
+        internal VeldridDevice(uint width, uint height)
+        {
+            var options = new GraphicsDeviceOptions { HasMainSwapchain = false, ResourceBindingModel = ResourceBindingModel.Improved };
+            Device = OperatingSystem.IsWindows() ? GraphicsDevice.CreateD3D11(options)
+                : OperatingSystem.IsMacOS() ? GraphicsDevice.CreateMetal(options)
+                : OperatingSystem.IsLinux() ? GraphicsDevice.CreateVulkan(options)
+                : throw new PlatformNotSupportedException(@"No offline graphics backend is available.");
+            Texture? colour = null;
+            try
+            {
+                colour = Factory.CreateTexture(TextureDescription.Texture2D(width, height, 1, 1,
+                    PixelFormat.R8G8B8A8UNorm, TextureUsage.RenderTarget | TextureUsage.Sampled));
+                offlineFramebuffer = Factory.CreateFramebuffer(new FramebufferDescription(null, colour));
+            }
+            catch
+            {
+                colour?.Dispose();
+                Device.Dispose();
+                throw;
+            }
+            MaxTextureSize = 16384;
+            currentWindowSize = new Vector2I((int)width, (int)height);
+        }
+
+        internal void DisposeOffline()
+        {
+            if (offlineFramebuffer == null)
+                throw new InvalidOperationException("Not an offline device.");
+            Device.WaitForIdle();
+            var colour = offlineFramebuffer.ColorTargets[0].Target;
+            offlineFramebuffer.Dispose();
+            colour.Dispose();
+            Device.Dispose();
+        }
         private Vector2I currentWindowSize;
 
         private readonly Direct3DPresentationMonitor? presentationMonitor;
@@ -102,7 +174,11 @@ namespace osu.Framework.Graphics.Veldrid
         /// </summary>
         /// <param name="graphicsSurface"></param>
         /// <exception cref="InvalidOperationException"></exception>
-        public VeldridDevice(IGraphicsSurface graphicsSurface)
+        /// <param name="presentationPreference">DXGI ownership preference.</param>
+        /// <param name="vulkanPreference">Vulkan present mode preference.</param>
+        /// <param name="requestVulkanExclusiveFullscreen">Whether to negotiate Vulkan FSE support.</param>
+        public VeldridDevice(IGraphicsSurface graphicsSurface, Configuration.PresentationPreference presentationPreference,
+                             Configuration.VulkanPresentationPreference vulkanPreference, bool requestVulkanExclusiveFullscreen)
         {
             // Veldrid must either be initialised on the main/"input" thread, or in a separate thread away from the draw thread at least.
             // Otherwise the window may not render anything on some platforms (macOS at least).
@@ -113,6 +189,15 @@ namespace osu.Framework.Graphics.Veldrid
             var options = new GraphicsDeviceOptions
             {
                 HasMainSwapchain = true,
+                PreferExclusiveFullscreen = presentationPreference == Configuration.PresentationPreference.PreferExclusiveFullscreen,
+                RequestVulkanExclusiveFullscreen = requestVulkanExclusiveFullscreen,
+                PreferredVulkanPresentMode = vulkanPreference switch
+                {
+                    Configuration.VulkanPresentationPreference.Immediate => 0,
+                    Configuration.VulkanPresentationPreference.Mailbox => 1,
+                    Configuration.VulkanPresentationPreference.Fifo => 2,
+                    _ => -1,
+                },
                 SwapchainDepthFormat = PixelFormat.R16UNorm,
                 SyncToVerticalBlank = true,
                 ResourceBindingModel = ResourceBindingModel.Improved,
@@ -203,7 +288,10 @@ namespace osu.Framework.Graphics.Veldrid
                     break;
 
                 case GraphicsSurfaceType.Vulkan:
-                    Device = GraphicsDevice.CreateVulkan(options, swapchain);
+                    Device = GraphicsDevice.CreateVulkan(options, swapchain, new VulkanDeviceOptions
+                    {
+                        EnableWin32CaptureInterop = Environment.GetEnvironmentVariable("G0V0_VULKAN_CAPTURE_INTEROP") == "1"
+                    });
                     Device.LogVulkan(out maxTextureSize);
                     vulkanPresentationMonitor = new VulkanPresentationMonitor(Device.MainSwapchain);
                     break;
@@ -238,6 +326,12 @@ namespace osu.Framework.Graphics.Veldrid
         /// <param name="windowSize">The window size.</param>
         public void Resize(Vector2I windowSize)
         {
+            if (offlineFramebuffer != null)
+            {
+                if (windowSize != currentWindowSize)
+                    throw new InvalidOperationException("Offline export size is fixed.");
+                return;
+            }
             if (windowSize != currentWindowSize)
             {
                 Device.ResizeMainWindow((uint)windowSize.X, (uint)windowSize.Y);
@@ -250,6 +344,9 @@ namespace osu.Framework.Graphics.Veldrid
         /// </summary>
         public void SwapBuffers()
         {
+            if (captureSession is { IsDisposed: false })
+                captureSession.Capture(DefaultFramebuffer.ColorTargets[0].Target);
+
             Device.SwapBuffers();
             presentationMonitor?.Update();
             vulkanPresentationMonitor?.Update();
@@ -276,7 +373,7 @@ namespace osu.Framework.Graphics.Veldrid
         /// </summary>
         public void MakeCurrent()
         {
-            if (graphicsSurface.Type == GraphicsSurfaceType.OpenGL)
+            if (graphicsSurface?.Type == GraphicsSurfaceType.OpenGL)
             {
                 var openGLGraphics = (IOpenGLGraphicsSurface)graphicsSurface;
                 openGLGraphics.MakeCurrent(openGLGraphics.WindowContext);
@@ -289,7 +386,7 @@ namespace osu.Framework.Graphics.Veldrid
         /// </summary>
         public void ClearCurrent()
         {
-            if (graphicsSurface.Type == GraphicsSurfaceType.OpenGL)
+            if (graphicsSurface?.Type == GraphicsSurfaceType.OpenGL)
             {
                 var openGLGraphics = (IOpenGLGraphicsSurface)graphicsSurface;
                 openGLGraphics.ClearCurrent();
@@ -301,9 +398,9 @@ namespace osu.Framework.Graphics.Veldrid
         /// </summary>
         public unsafe Image<Rgba32> TakeScreenshot()
         {
-            var texture = Device.SwapchainFramebuffer.ColorTargets[0].Target;
+            var texture = DefaultFramebuffer.ColorTargets[0].Target;
 
-            switch (graphicsSurface.Type)
+            switch (SurfaceType)
             {
                 // Veldrid doesn't support copying content from a swapchain framebuffer texture on OpenGL.
                 // OpenGL already provides a method for reading pixels directly from the active framebuffer, so let's just use that for now.
@@ -380,7 +477,7 @@ namespace osu.Framework.Graphics.Veldrid
         {
             // todo: Metal doesn't support WaitForFence due to lack of implementation and bugs with supporting MTLSharedEvent.notifyListener,
             // until that is fixed in some way or another, poll on the signal state.
-            if (graphicsSurface.Type == GraphicsSurfaceType.Metal)
+            if (graphicsSurface?.Type == GraphicsSurfaceType.Metal)
             {
                 const int sleep_time = 10;
 

@@ -2,6 +2,7 @@
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
+using System.Threading;
 using osu.Framework.Graphics;
 
 namespace osu.Framework.Development
@@ -19,7 +20,26 @@ namespace osu.Framework.Development
         /// placeholder behavior have to enable this explicitly, while tests which intend to verify that a load failure is
         /// reported have to leave it disabled (the default).
         /// </remarks>
-        public static bool Enabled { get; set; } = DebugUtils.IsDebugBuild && !DebugUtils.IsNUnitRunning;
+        public static bool Enabled
+        {
+            get => enabled && !suppressed.Value;
+            set => enabled = value;
+        }
+
+        private static bool enabled = DebugUtils.IsDebugBuild && !DebugUtils.IsNUnitRunning;
+        private static readonly AsyncLocal<bool> suppressed = new AsyncLocal<bool>();
+
+        // Export failures must propagate without disabling the live host's error boundary.
+        internal static IDisposable Suppress() => new SuppressionScope();
+
+        private sealed class SuppressionScope : IDisposable
+        {
+            private readonly bool previous = suppressed.Value;
+
+            public SuppressionScope() => suppressed.Value = true;
+
+            public void Dispose() => suppressed.Value = previous;
+        }
 
         /// <summary>
         /// An optional factory used to create the placeholder drawable which replaces a failed component.

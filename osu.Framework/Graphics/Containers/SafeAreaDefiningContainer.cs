@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
@@ -37,7 +37,7 @@ namespace osu.Framework.Graphics.Containers
             }
         }
 
-        [Resolved]
+        [Resolved(canBeNull: true)]
         private GameHost host { get; set; }
 
         private readonly IBindable<MarginPadding> hostSafeArea = new BindableSafeArea();
@@ -46,7 +46,7 @@ namespace osu.Framework.Graphics.Containers
         {
             base.LoadComplete();
 
-            if (usesCustomBinding || host.Window == null)
+            if (usesCustomBinding || host?.Window == null)
                 return;
 
             hostSafeArea.BindTo(host.Window.SafeAreaPadding);

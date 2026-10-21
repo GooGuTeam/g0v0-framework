@@ -1,4 +1,4 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
 // See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
@@ -62,12 +62,6 @@ namespace osu.Framework.Platform
         public IRenderer Renderer { get; private set; }
 
         public string RendererInfo { get; private set; }
-
-        /// <summary>
-        /// Whether "unlimited" frame limiter should be allowed to exceed sane limits.
-        /// Only use this for benchmarking purposes (see <see cref="maximum_sane_fps"/> for further reasoning).
-        /// </summary>
-        public bool AllowBenchmarkUnlimitedFrames { get; set; }
 
         protected FrameworkDebugConfigManager DebugConfig { get; private set; }
 
@@ -505,6 +499,11 @@ namespace osu.Framework.Platform
             // Do *not* allow tearing when VRR enabled, not even in fullscreen via mechanisms like FifoRelaxed, to ensure we can pace
             // the monitor's refresh cycle correctly.
             bool isVrr = frameSyncMode.Value == FrameSync.VSyncVRR;
+            if (Renderer is Renderer presentationRenderer)
+            {
+                presentationRenderer.FullscreenRefreshRate = Window.CurrentDisplayMode.Value.RefreshRate;
+                presentationRenderer.ExclusiveFullscreenAllowed = windowMode.Value == WindowMode.Fullscreen;
+            }
             Renderer.AllowTearing = windowMode.Value == WindowMode.Fullscreen && !isVrr;
 
             TripleBuffer<DrawNode>.Buffer buffer;
@@ -1032,6 +1031,13 @@ namespace osu.Framework.Platform
                 Window.Create();
                 Window.Title = Options.FriendlyGameName;
 
+                if (Renderer is Renderer configurableRenderer)
+                {
+                    configurableRenderer.PresentationPreference = Config.Get<PresentationPreference>(FrameworkSetting.PresentationPreference);
+                    configurableRenderer.VulkanPresentationPreference = Config.Get<VulkanPresentationPreference>(FrameworkSetting.VulkanPresentationPreference);
+                    configurableRenderer.RequestVulkanExclusiveFullscreen = Config.Get<bool>(FrameworkSetting.RequestVulkanExclusiveFullscreen);
+                }
+
                 Renderer.Initialise(Window.GraphicsSurface);
 
                 Logger.Log("🖼️ Renderer initialised!");
@@ -1324,21 +1330,6 @@ namespace osu.Framework.Platform
             inputConfig = new InputConfigManager(Storage, AvailableInputHandlers);
         }
 
-        /// <summary>
-        /// Games using osu!framework can generally run at *very* high frame rates when not much is going on.
-        ///
-        /// This can be counter-productive due to the induced allocation and GPU overhead.
-        /// - Allocation overhead can lead to excess garbage collection
-        /// - GPU overhead can lead to unexpected pipeline blocking (and stutters as a result).
-        ///   Also, in general graphics card manufacturers do not test their hardware at insane frame rates and
-        ///   therefore drivers are not optimised to handle this kind of throughput.
-        /// - We only harvest input at 1000hz, so running any higher has zero benefits.
-        ///
-        /// We limit things to the same rate we poll input at, to keep both gamers and their systems happy
-        /// and (more) stutter-free.
-        /// </summary>
-        private const int maximum_sane_fps = GameThread.DEFAULT_ACTIVE_HZ;
-
         private void updateFrameSyncMode()
         {
             if (Window == null)
@@ -1389,12 +1380,6 @@ namespace osu.Framework.Platform
                     drawLimiter = int.MaxValue;
                     updateLimiter = int.MaxValue;
                     break;
-            }
-
-            if (!AllowBenchmarkUnlimitedFrames)
-            {
-                drawLimiter = Math.Min(maximum_sane_fps, drawLimiter);
-                updateLimiter = Math.Min(maximum_sane_fps, updateLimiter);
             }
 
             MaximumDrawHz = drawLimiter;

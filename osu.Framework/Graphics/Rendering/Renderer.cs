@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Concurrent;
@@ -35,6 +35,12 @@ namespace osu.Framework.Graphics.Rendering
     /// </summary>
     public abstract class Renderer : IRenderer
     {
+        internal Configuration.PresentationPreference PresentationPreference { get; set; }
+        internal Configuration.VulkanPresentationPreference VulkanPresentationPreference { get; set; }
+        internal bool RequestVulkanExclusiveFullscreen { get; set; }
+        internal virtual bool ExclusiveFullscreenAllowed { get; set; }
+        internal virtual double FullscreenRefreshRate { get; set; }
+
         /// <summary>
         /// The length of no usage (in frames) before freeing unused resources.
         /// </summary>
@@ -177,7 +183,11 @@ namespace osu.Framework.Graphics.Rendering
             }
 
             Initialise(graphicsSurface);
+            CompleteInitialisation();
+        }
 
+        protected void CompleteInitialisation()
+        {
             defaultQuadBatch = CreateQuadBatch<TexturedVertex2D>(100, 1000);
             resetScheduler.AddDelayed(disposalQueue.CheckPendingDisposals, 0, true);
 
@@ -313,6 +323,8 @@ namespace osu.Framework.Graphics.Rendering
             if (IsInitialised)
                 expensiveOperationQueue.Enqueue(operation);
         }
+
+        protected void DrainDisposalsAfterGpuIdle() => disposalQueue.Drain();
 
         public void ScheduleDisposal<T>(Action<T> disposalAction, T target)
         {

@@ -1,0 +1,6 @@
+﻿<Project>
+  <!-- RID-specific builds use NuGet runtime assets. RID-less Windows desktop builds also need the application-local WASAPI DLL. -->
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT' and '$(RuntimeIdentifier)' == '' and '$(PlatformTarget)' != 'x86' and '$(PlatformTarget)' != 'ARM64' and '$(TargetPlatformIdentifier)' != 'android' and '$(TargetPlatformIdentifier)' != 'ios'">
+    <Content Include="$(MSBuildThisFileDirectory)../runtimes/win-x64/native/g0v0-gpu-video.dll;$(MSBuildThisFileDirectory)../runtimes/win-x64/native/g0v0-wasapi-capture.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+</Project>

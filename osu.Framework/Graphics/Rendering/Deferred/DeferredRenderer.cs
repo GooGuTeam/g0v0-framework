@@ -23,11 +23,13 @@ using Texture = Veldrid.Texture;
 
 namespace osu.Framework.Graphics.Rendering.Deferred
 {
-    internal class DeferredRenderer : Renderer, IVeldridRenderer, IDirect3DRenderer, IVulkanRenderer
+    internal class DeferredRenderer : Renderer, IVeldridRenderer, IDirect3DRenderer, IVulkanRenderer, IGpuFrameCaptureRenderer
     {
         public VeldridDevice VeldridDevice { get; private set; } = null!;
         public Direct3DPresentationStatus? PresentationStatus => VeldridDevice.PresentationStatus;
         VulkanPresentationStatus? IVulkanRenderer.PresentationStatus => VeldridDevice.VulkanPresentationStatus;
+
+        public GpuFrameCaptureSession StartGpuFrameCapture(int capacity = 3) => VeldridDevice.StartGpuFrameCapture(capacity);
 
         public DeferredContext Context { get; private set; } = null!;
         public GraphicsPipeline Graphics { get; private set; } = null!;
@@ -38,7 +40,7 @@ namespace osu.Framework.Graphics.Rendering.Deferred
 
         protected override void Initialise(IGraphicsSurface graphicsSurface)
         {
-            VeldridDevice = new VeldridDevice(graphicsSurface);
+            VeldridDevice = new VeldridDevice(graphicsSurface, PresentationPreference, VulkanPresentationPreference, RequestVulkanExclusiveFullscreen);
             Graphics = new GraphicsPipeline(VeldridDevice);
             texturePool = new VeldridStagingTexturePool(Graphics);
             Context = new DeferredContext(this);
@@ -159,6 +161,18 @@ namespace osu.Framework.Graphics.Rendering.Deferred
         {
             get => VeldridDevice.VerticalSync;
             set => VeldridDevice.VerticalSync = value;
+        }
+
+        internal override double FullscreenRefreshRate
+        {
+            get => VeldridDevice.FullscreenRefreshRate;
+            set => VeldridDevice.FullscreenRefreshRate = value;
+        }
+
+        internal override bool ExclusiveFullscreenAllowed
+        {
+            get => VeldridDevice.ExclusiveFullscreenAllowed;
+            set => VeldridDevice.ExclusiveFullscreenAllowed = value;
         }
 
         protected internal override bool AllowTearing

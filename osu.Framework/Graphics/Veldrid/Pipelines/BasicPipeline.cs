@@ -37,6 +37,12 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
             => device.Factory;
 
         /// <summary>
+        /// The default framebuffer for this pipeline.
+        /// </summary>
+        protected Framebuffer DefaultFramebuffer
+            => device.DefaultFramebuffer;
+
+        /// <summary>
         /// The command list.
         /// </summary>
         public CommandList Commands { get; }
@@ -200,6 +206,17 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
             var resources = texture.GetResourceList();
             for (int i = 0; i < resources.Count; i++)
                 Commands.GenerateMipmaps(resources[i].Texture);
+        }
+
+        /// <summary>Releases pipeline resources after the owning device has become idle.</summary>
+        public virtual void DisposeAfterGpuIdle()
+        {
+            Commands.Dispose();
+            foreach (var execution in pendingExecutions)
+                execution.Fence.Dispose();
+            pendingExecutions.Clear();
+            while (fencePool.TryDequeue(out var fence))
+                fence.Dispose();
         }
 
         private readonly record struct ExecutionCompletionFence(Fence Fence, ulong Index);

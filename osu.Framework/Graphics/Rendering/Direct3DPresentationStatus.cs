@@ -12,6 +12,14 @@ namespace osu.Framework.Graphics.Rendering
     /// </remarks>
     public sealed record Direct3DPresentationStatus(Direct3DPresentationModel? Model, bool? ExclusiveFullscreen)
     {
+        public bool? FrameLatencyWaitActive { get; init; }
+        public int? MaximumFrameLatency { get; init; }
+
+        // Media statistics distinguish composition and hardware overlays, but cannot
+        // distinguish all PresentMon paths (in particular Legacy/Independent Flip).
+        public bool? HardwareOverlay { get; init; }
+        public bool? Composed { get; init; }
+
         public bool? UsesFlipModel => Model == null ? null : Model is Direct3DPresentationModel.FlipSequential or Direct3DPresentationModel.FlipDiscard;
     }
 }

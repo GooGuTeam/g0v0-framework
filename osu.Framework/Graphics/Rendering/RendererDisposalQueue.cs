@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -73,6 +73,28 @@ namespace osu.Framework.Graphics.Rendering
                          || pendingDisposals[lastExecutedDisposal + 1].RemainingFrameDelay >= 0);
 
             pendingDisposals.RemoveRange(0, lastExecutedDisposal + 1);
+        }
+
+        /// <summary>
+        /// Drains every deferred disposal after the owning GPU has become idle.
+        /// Call only during renderer shutdown, after all producer resources are disposed.
+        /// </summary>
+        public void Drain()
+        {
+            while (true)
+            {
+                lock (newDisposals)
+                {
+                    pendingDisposals.AddRange(newDisposals);
+                    newDisposals.Clear();
+                }
+                if (pendingDisposals.Count == 0)
+                    return;
+                var batch = pendingDisposals.ToArray();
+                pendingDisposals.Clear();
+                foreach (var disposal in batch)
+                    disposal.Run();
+            }
         }
 
         private class PendingDisposal<T> : IPendingDisposal

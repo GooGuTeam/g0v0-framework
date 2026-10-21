@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -28,7 +28,12 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
         private GraphicsPipelineDescription pipelineDesc = new GraphicsPipelineDescription
         {
             RasterizerState = RasterizerStateDescription.CULL_NONE,
-            BlendState = BlendStateDescription.SINGLE_OVERRIDE_BLEND,
+            // Veldrid's static preset contains a mutable array. Each renderer must own its
+            // attachment states so live drawing and offline export cannot change each other's keys.
+            BlendState = new BlendStateDescription
+            {
+                AttachmentStates = new[] { BlendAttachmentDescription.OVERRIDE_BLEND },
+            },
             ShaderSet = { VertexLayouts = new VertexLayoutDescription[1] }
         };
 
@@ -41,7 +46,18 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
         public GraphicsPipeline(VeldridDevice device)
             : base(device)
         {
-            pipelineDesc.Outputs = Device.SwapchainFramebuffer.OutputDescription;
+            pipelineDesc.Outputs = DefaultFramebuffer.OutputDescription;
+        }
+
+        public override void DisposeAfterGpuIdle()
+        {
+            base.DisposeAfterGpuIdle();
+            foreach (var pipeline in pipelineCache.Values)
+                pipeline.Dispose();
+            pipelineCache.Clear();
+            attachedTextures.Clear();
+            attachedUniformBuffers.Clear();
+            uniformBufferOffsets.Clear();
         }
 
         public override void Begin()
@@ -65,7 +81,7 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
         {
             Commands.ClearColorTarget(0, clearInfo.Colour.ToRgbaFloat());
 
-            var framebuffer = currentFrameBuffer?.Framebuffer ?? Device.SwapchainFramebuffer;
+            var framebuffer = currentFrameBuffer?.Framebuffer ?? DefaultFramebuffer;
             if (framebuffer.DepthTarget != null)
                 Commands.ClearDepthStencil((float)clearInfo.Depth, (byte)clearInfo.Stencil);
         }
@@ -159,7 +175,7 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
         {
             currentFrameBuffer = frameBuffer;
 
-            Framebuffer fb = frameBuffer?.Framebuffer ?? Device.SwapchainFramebuffer;
+            Framebuffer fb = frameBuffer?.Framebuffer ?? DefaultFramebuffer;
 
             Commands.SetFramebuffer(fb);
             pipelineDesc.Outputs = fb.OutputDescription;
@@ -305,7 +321,9 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
         {
             if (!pipelineCache.TryGetValue(pipelineDesc, out var instance))
             {
-                pipelineCache[pipelineDesc.Clone()] = instance = Factory.CreateGraphicsPipeline(ref pipelineDesc);
+                var description = pipelineDesc.Clone();
+                instance = Factory.CreateGraphicsPipeline(ref description);
+                pipelineCache.Add(description, instance);
                 stat_graphics_pipeline_created.Value++;
             }
 

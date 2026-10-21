@@ -58,19 +58,33 @@ namespace osu.Framework.Audio.Callbacks
         {
             lock (sync_lock)
             {
-                if (isInitialized && nativeProcedure != IntPtr.Zero)
-                {
-                    procedure = nativeProcedure;
-                    context = userContext;
-                    return true;
-                }
-
                 if (RuntimeInfo.OS != RuntimeInfo.Platform.Windows)
                 {
                     procedure = IntPtr.Zero;
                     context = IntPtr.Zero;
                     providerName = "Unsupported OS";
                     return false;
+                }
+
+                try
+                {
+                    if (tryGetBassChannelGetData(out IntPtr getData) && NativeWasapiCapture.TryCreate(getData, out procedure, out context))
+                    {
+                        providerName = "Native PCM capture bridge";
+                        return true;
+                    }
+                }
+                catch (Exception)
+                {
+                    // An optional recorder must never prevent normal low-latency audio initialisation.
+                    Logger.Log("Native audio capture unavailable; using the normal WASAPI bridge.", level: LogLevel.Important);
+                }
+
+                if (isInitialized && nativeProcedure != IntPtr.Zero)
+                {
+                    procedure = nativeProcedure;
+                    context = userContext;
+                    return true;
                 }
 
                 if (userContext == IntPtr.Zero)
@@ -104,6 +118,7 @@ namespace osu.Framework.Audio.Callbacks
         /// <param name="handle">The BASS mixer stream channel handle, or 0 if inactive.</param>
         public static void SetMixerHandle(int handle)
         {
+            NativeWasapiCapture.SetMixer(handle);
             IntPtr ctx = userContext;
             if (ctx != IntPtr.Zero)
             {
@@ -129,6 +144,7 @@ namespace osu.Framework.Audio.Callbacks
             lock (sync_lock)
             {
                 Reset();
+                NativeWasapiCapture.FreeAfterWasapiStopped();
 
                 if (nativeProcedure != IntPtr.Zero)
                 {

@@ -5,7 +5,6 @@ using System;
 using System.Runtime.InteropServices;
 using NUnit.Framework;
 using osu.Framework.Audio.Callbacks;
-using osu.Framework.Platform;
 
 namespace osu.Framework.Tests.Audio
 {

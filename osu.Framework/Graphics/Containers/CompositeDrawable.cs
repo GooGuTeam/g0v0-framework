@@ -1303,8 +1303,15 @@ namespace osu.Framework.Graphics.Containers
         /// </summary>
         /// <remarks>
         /// The load-complete phase is conceptually part of loading, but - unlike the rest of it - it runs here, on the update thread (see
-        /// <see cref="Drawable.UpdateSubTree"/>). It is therefore isolated here rather than in <see cref="loadChild(Drawable)"/>, so that a component
-        /// which was misconfigured in a way that only surfaces while completing its load does not take down the game.
+        /// <see cref="Drawable.UpdateSubTree"/>), immediately before the regular update of the same pass. It is therefore isolated here rather than in
+        /// <see cref="loadChild(Drawable)"/>, so that a component which was misconfigured in a way that only surfaces while completing its load does not
+        /// take down the game.
+        /// <para>
+        /// The exception is caught around <see cref="Drawable.UpdateSubTree"/> as a whole, rather than by running the load-complete phase ahead of it, so
+        /// that the virtual method keeps deciding when its own load completes - a subclass which holds its <c>base.UpdateSubTree()</c> back is relying on
+        /// exactly that. <see cref="Drawable.LoadCompleteFailed"/> then narrows the isolation to failures of the load-complete phase: a failure thrown by
+        /// the regular <see cref="Drawable.Update"/> of the very same pass still propagates, as it always has.
+        /// </para>
         /// </remarks>
         /// <returns>
         /// Whether <paramref name="child"/> is still an alive child of this <see cref="CompositeDrawable"/>. A return value of <c>false</c> indicates
@@ -1316,9 +1323,9 @@ namespace osu.Framework.Graphics.Containers
 
             try
             {
-                child.RunLoadComplete();
+                child.UpdateSubTree();
             }
-            catch (Exception e) when (LoadErrorHandling.Enabled)
+            catch (Exception e) when (LoadErrorHandling.Enabled && child.LoadCompleteFailed)
             {
                 isolateFailedChild(child, singular(e));
 
@@ -1326,7 +1333,6 @@ namespace osu.Framework.Graphics.Containers
                 return child.IsAlive;
             }
 
-            child.UpdateSubTree();
             return true;
         }
 

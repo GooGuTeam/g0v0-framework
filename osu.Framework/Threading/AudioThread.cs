@@ -14,7 +14,6 @@ using osu.Framework.Bindables;
 using osu.Framework.Development;
 using osu.Framework.Logging;
 using osu.Framework.Platform.Linux.Native;
-using ManagedBass.Fx;
 using osu.Framework.Audio.Callbacks;
 
 namespace osu.Framework.Threading
@@ -28,7 +27,7 @@ namespace osu.Framework.Threading
             PreloadBass();
         }
 
-        public override bool IsCurrent => ThreadSafety.IsAudioThread;
+        public override bool IsCurrent => ThreadSafety.IsAudioThread && (Thread == null || System.Threading.Thread.CurrentThread == Thread);
 
         internal sealed override void MakeCurrent()
         {
@@ -161,6 +160,8 @@ namespace osu.Framework.Threading
         {
             Debug.Assert(ThreadSafety.IsAudioThread);
 
+            // Quiesce the callback before Bass.Free can destroy the stream it is reading.
+            freeWasapi();
             int selectedDevice = Bass.CurrentDevice;
 
             if (canSelectDevice(deviceId))
@@ -168,8 +169,6 @@ namespace osu.Framework.Threading
                 Bass.CurrentDevice = deviceId;
                 Bass.Free();
             }
-
-            freeWasapi();
 
             if (selectedDevice != deviceId && canSelectDevice(selectedDevice))
                 Bass.CurrentDevice = selectedDevice;
@@ -241,8 +240,13 @@ namespace osu.Framework.Threading
             {
                 if (notify == WasapiNotificationType.DefaultOutput)
                 {
-                    freeWasapi();
-                    initWasapi(device, isExclusive, buffer, period);
+                    // Rebuild the child mixers as well as WASAPI's root mixer. Replacing
+                    // only the root leaves playback and capture attached to the old graph.
+                    lock (managers)
+                    {
+                        foreach (var manager in managers)
+                            manager.RestartAudioEngine();
+                    }
                 }
             });
             float v = (float)period;
@@ -328,10 +332,34 @@ namespace osu.Framework.Threading
             if (!initialised)
                 return false;
 
-            BassWasapi.GetInfo(out var wasapiInfo);
-            globalMixerHandle.Value = BassMix.CreateMixerStream(wasapiInfo.Frequency, wasapiInfo.Channels, BassFlags.MixerNonStop | BassFlags.Decode | BassFlags.Float);
-            WasapiNativeBridge.SetMixerHandle(globalMixerHandle.Value.Value);
-            BassWasapi.Start();
+            if (!BassWasapi.GetInfo(out var wasapiInfo))
+            {
+                freeWasapi();
+                return false;
+            }
+            int mixer = BassMix.CreateMixerStream(wasapiInfo.Frequency, wasapiInfo.Channels, BassFlags.MixerNonStop | BassFlags.Decode | BassFlags.Float);
+            if (mixer == 0)
+            {
+                freeWasapi();
+                return false;
+            }
+            globalMixerHandle.Value = mixer;
+            try
+            {
+                NativeWasapiCapture.Configure(wasapiInfo.Frequency, wasapiInfo.Channels);
+            }
+            catch (Exception ex)
+            {
+                // Optional recording must not prevent the playback device from starting.
+                NativeWasapiCapture.Stopped();
+                Logger.Error(ex, @"Unable to configure WASAPI recording capture.");
+            }
+            WasapiNativeBridge.SetMixerHandle(mixer);
+            if (!BassWasapi.Start())
+            {
+                freeWasapi();
+                return false;
+            }
 
             BassWasapi.SetNotify(wasapiNotifyProcedure);
             return true;
@@ -339,6 +367,14 @@ namespace osu.Framework.Threading
 
         private void freeWasapi()
         {
+            // Stop and join the native producer before clearing/freeing its mixer or capture memory.
+            if (RuntimeInfo.OS == RuntimeInfo.Platform.Windows)
+            {
+                BassWasapi.Stop();
+                BassWasapi.Free();
+            }
+
+            NativeWasapiCapture.Stopped();
             WasapiNativeBridge.Reset();
 
             if (globalMixerHandle.Value != null)
@@ -348,12 +384,7 @@ namespace osu.Framework.Threading
                 globalMixerHandle.Value = null;
             }
 
-            // BassWasapi is a Windows-only native dependency; touching it on other platforms would throw DllNotFoundException.
-            if (RuntimeInfo.OS != RuntimeInfo.Platform.Windows)
-                return;
 
-            BassWasapi.Stop();
-            BassWasapi.Free();
         }
 
         #endregion

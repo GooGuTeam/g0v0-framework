@@ -21,6 +21,7 @@ namespace osu.Framework.Graphics.Veldrid
 
         private readonly Swapchain swapchain;
         private readonly PropertyInfo? nativeSwapchainProperty;
+        private readonly PropertyInfo? frameLatencyWaitProperty;
         private readonly Stopwatch stopwatch = Stopwatch.StartNew();
         private double lastPollTime = -poll_interval;
         private bool errorLogged;
@@ -34,7 +35,8 @@ namespace osu.Framework.Graphics.Veldrid
             // The pinned Veldrid backend exposes this property on its internal D3D11Swapchain type,
             // but BackendInfoD3D11 does not provide a public swap chain accessor. Never retain or dispose
             // the borrowed native wrapper: Veldrid can replace it when tearing settings change.
-            nativeSwapchainProperty = swapchain.GetType().GetProperty("DxgiSwapChain", BindingFlags.Instance | BindingFlags.Public);
+            nativeSwapchainProperty = swapchain.GetType().GetProperty(@"DxgiSwapChain", BindingFlags.Instance | BindingFlags.Public);
+            frameLatencyWaitProperty = swapchain.GetType().GetProperty(@"FrameLatencyWaitActive", BindingFlags.Instance | BindingFlags.Public);
         }
 
         public void Update()
@@ -47,12 +49,23 @@ namespace osu.Framework.Graphics.Veldrid
             lastPollTime = now;
             Direct3DPresentationModel? model = null;
             bool? exclusiveFullscreen = null;
+            bool? waitActive = null;
+            int? maximumLatency = null;
+            bool? hardwareOverlay = null;
+            bool? composed = null;
 
             try
             {
                 if (nativeSwapchainProperty?.GetValue(swapchain) is IDXGISwapChain nativeSwapchain)
                 {
-                    model = nativeSwapchain.Description.SwapEffect switch
+                    var result = nativeSwapchain.GetFullscreenState(out var fullscreen, out var output);
+                    // The output reference is owned even though the swapchain is borrowed.
+                    output?.Dispose();
+                    if (result.Success)
+                        exclusiveFullscreen = fullscreen;
+
+                    var description = nativeSwapchain.Description;
+                    model = description.SwapEffect switch
                     {
                         SwapEffect.Discard => Direct3DPresentationModel.BitBltDiscard,
                         SwapEffect.Sequential => Direct3DPresentationModel.BitBltSequential,
@@ -61,11 +74,46 @@ namespace osu.Framework.Graphics.Veldrid
                         _ => null,
                     };
 
-                    var result = nativeSwapchain.GetFullscreenState(out var fullscreen, out var output);
-                    // GetFullscreenState returns an owned output reference even though the swap chain is borrowed.
-                    output?.Dispose();
-                    if (result.Success)
-                        exclusiveFullscreen = fullscreen;
+                    waitActive = frameLatencyWaitProperty?.GetValue(swapchain) as bool?;
+                    // GetMaximumFrameLatency is only valid for waitable swapchains.
+                    // D3D11 exclusive ownership uses a non-waitable swapchain.
+                    if ((description.Flags & SwapChainFlags.FrameLatencyWaitableObject) != 0)
+                    {
+                        try
+                        {
+                            using var swapchain2 = nativeSwapchain.QueryInterfaceOrNull<IDXGISwapChain2>();
+                            if (swapchain2 != null)
+                                maximumLatency = swapchain2.MaximumFrameLatency;
+                        }
+                        catch (Exception)
+                        {
+                            // Optional pacing information must not invalidate fullscreen status.
+                        }
+                    }
+
+                    // Media statistics may be unsupported or disjoint during a mode change.
+                    // Failure must not discard the independently queried swapchain properties.
+                    if (exclusiveFullscreen != true)
+                    {
+                        try
+                        {
+                            using var media = nativeSwapchain.QueryInterfaceOrNull<IDXGISwapChainMedia>();
+                            if (media != null)
+                            {
+                                var statistics = media.FrameStatisticsMedia;
+                                if (statistics.PresentCount != 0)
+                                {
+                                    // DXGI_FRAME_PRESENTATION_MODE: Composed = 0, Overlay = 1, None = 2.
+                                    composed = (int)statistics.CompositionMode == 0;
+                                    hardwareOverlay = (int)statistics.CompositionMode == 1;
+                                }
+                            }
+                        }
+                        catch (Exception)
+                        {
+                            // Unavailable statistics leave the compositor path unknown.
+                        }
+                    }
                 }
                 else if (!errorLogged)
                 {
@@ -82,7 +130,13 @@ namespace osu.Framework.Graphics.Veldrid
                 }
             }
 
-            var newStatus = new Direct3DPresentationStatus(model, exclusiveFullscreen);
+            var newStatus = new Direct3DPresentationStatus(model, exclusiveFullscreen)
+            {
+                FrameLatencyWaitActive = waitActive,
+                MaximumFrameLatency = maximumLatency,
+                HardwareOverlay = hardwareOverlay,
+                Composed = composed,
+            };
 
             if (newStatus != Status)
             {

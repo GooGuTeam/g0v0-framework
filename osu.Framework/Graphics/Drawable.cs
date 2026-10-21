@@ -197,6 +197,16 @@ namespace osu.Framework.Graphics
         private volatile LoadState loadState;
 
         /// <summary>
+        /// Whether <see cref="LoadComplete"/> (or <see cref="OnLoadComplete"/>) threw while this <see cref="Drawable"/> completed its load.
+        /// </summary>
+        /// <remarks>
+        /// The load-complete phase runs on the update thread, from within <see cref="UpdateSubTree"/>, and is immediately followed in the same pass by
+        /// <see cref="Update"/>. A <see cref="CompositeDrawable"/> therefore needs a way to tell the two apart when deciding whether an exception
+        /// escaping <see cref="UpdateSubTree"/> may be isolated (see <see cref="CompositeDrawable.updateChild(Drawable)"/>).
+        /// </remarks>
+        internal bool LoadCompleteFailed { get; private set; }
+
+        /// <summary>
         /// Describes the current state of this Drawable within the loading pipeline.
         /// </summary>
         public LoadState LoadState => loadState;
@@ -328,28 +338,21 @@ namespace osu.Framework.Graphics
             // Only layout flags are required, as non-layout flags are always propagated by the parent.
             Invalidate(Invalidation.Layout, InvalidationSource.Parent);
 
-            LoadComplete();
+            try
+            {
+                LoadComplete();
 
-            OnLoadComplete?.Invoke(this);
-            OnLoadComplete = null;
-            return true;
-        }
+                OnLoadComplete?.Invoke(this);
+                OnLoadComplete = null;
+            }
+            catch
+            {
+                // recorded before rethrowing, so that the parent - which only sees the exception - can tell that it escaped the load-complete phase
+                // rather than the regular update which follows it in the same pass.
+                LoadCompleteFailed = true;
+                throw;
+            }
 
-        /// <summary>
-        /// Runs the load-complete phase of this <see cref="Drawable"/> (see <see cref="LoadComplete"/>) if it is still pending.
-        /// </summary>
-        /// <remarks>
-        /// This is normally invoked from <see cref="UpdateSubTree"/>. It is exposed separately so that a <see cref="CompositeDrawable"/> can run it
-        /// for a child before updating that child, and isolate a failure in the same way as a failure in the load pipeline proper. Unlike the rest of
-        /// loading, this phase runs on the update thread, so a failure in it would otherwise take the whole game down with it.
-        /// </remarks>
-        /// <returns>Whether this invocation completed the load of this <see cref="Drawable"/>.</returns>
-        internal bool RunLoadComplete()
-        {
-            if (loadState != LoadState.Ready)
-                return false;
-
-            loadComplete();
             return true;
         }
 
@@ -503,9 +506,8 @@ namespace osu.Framework.Graphics
             if (loadState < LoadState.Ready)
                 return false;
 
-            // normally already run by our parent, so that a failure can be isolated (see CompositeDrawable.updateChild()). this remains here for
-            // drawables which are updated without going through a CompositeDrawable parent.
-            RunLoadComplete();
+            if (loadState == LoadState.Ready)
+                loadComplete();
 
             Debug.Assert(loadState == LoadState.Loaded);
 
