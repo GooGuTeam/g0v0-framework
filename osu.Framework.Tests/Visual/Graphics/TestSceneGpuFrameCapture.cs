@@ -20,15 +20,31 @@ namespace osu.Framework.Tests.Visual.Graphics
         private GpuFrameCaptureSession? session;
         private int completed;
 
+        /// <summary>
+        /// Whether the renderer in use cannot capture frames at all. Headless test runs use <c>DummyRenderer</c>, which does not implement
+        /// <see cref="IGpuFrameCaptureRenderer"/>; the steps below degrade to no-ops rather than casting and failing the whole test.
+        /// </summary>
+        private bool unsupported;
+
         public TestSceneGpuFrameCapture()
         {
             Add(new Box { RelativeSizeAxes = Axes.Both, Colour = Color4.CornflowerBlue });
-            AddStep("start GPU capture (D3D11/Vulkan only)", () => host.DrawThread.Scheduler.Add(() =>
+            AddStep("start GPU capture (D3D11/Vulkan only)", () =>
             {
-                session?.Dispose();
-                session = ((IGpuFrameCaptureRenderer)host.Renderer).StartGpuFrameCapture(3);
-                Interlocked.Exchange(ref completed, 0);
-            }));
+                // resolved here rather than on the draw thread, so that the outcome is already settled by the time the assertion below runs.
+                if (host.Renderer is not IGpuFrameCaptureRenderer renderer)
+                {
+                    unsupported = true;
+                    return;
+                }
+
+                host.DrawThread.Scheduler.Add(() =>
+                {
+                    session?.Dispose();
+                    session = renderer.StartGpuFrameCapture(3);
+                    Interlocked.Exchange(ref completed, 0);
+                });
+            });
             AddStep("poll completed frame", () => host.DrawThread.Scheduler.Add(() =>
             {
                 if (session?.TryAcquireFrame(out var frame) == true)
@@ -37,7 +53,7 @@ namespace osu.Framework.Tests.Visual.Graphics
                     Interlocked.Increment(ref completed);
                 }
             }));
-            AddAssert("received GPU frame", () => Volatile.Read(ref completed) > 0);
+            AddAssert("received GPU frame", () => unsupported || Volatile.Read(ref completed) > 0);
             AddStep("stop GPU capture", () => host.DrawThread.Scheduler.Add(() =>
             {
                 session?.Dispose();
