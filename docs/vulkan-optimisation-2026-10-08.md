@@ -21,10 +21,10 @@ Artifacts: `%TEMP%\g0v0-vulkan-validation\<run>\`.
 The prior four ShaderOutputNotConsumed warnings are absent without message filtering.
 
 Related unit tests (VeldridTextureUploadTest, RendererTest, ShaderRegexTest, ShaderStorageBufferObjectStackTest): 27 passed.
-Framework.Tests and g0v0 Desktop built successfully using `-p:UseLocalVeldrid=true`; existing package vulnerability warnings remain. Desktop was rebuilt but not launched for an additional gameplay pass in this optimisation round.
+Framework.Tests and g0v0 Desktop built successfully using `-p:G0V0SourceVeldrid=true`; existing package vulnerability warnings remain. Desktop was rebuilt but not launched for an additional gameplay pass in this optimisation round.
 
 ## Scope and limitations
 
 These are targeted usage improvements, not measured FPS/latency claims. No controlled A/B timing benchmark has been performed. Validation-enabled timing is not representative of normal gameplay performance. Hardware coverage is limited to this NVIDIA machine, with no FSE regression test in this round.
 
-Framework changes apply to ordinary and deferred backends. The CopyBuffer backend change requires the sibling local Veldrid checkout and `UseLocalVeldrid=true`; the packaged dependency does not contain it. All previous fixes/FSE work and unrelated user edits are retained.
+Framework changes apply to ordinary and deferred backends. The CopyBuffer backend change requires the sibling local Veldrid checkout and `G0V0SourceVeldrid=true`; the packaged dependency does not contain it. All previous fixes/FSE work and unrelated user edits are retained.

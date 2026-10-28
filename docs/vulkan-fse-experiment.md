@@ -7,14 +7,14 @@ This is an opt-in Windows experiment, not a default renderer change.
 The sibling `veldrid` checkout must contain the local FSE changes (base commit `a405fe8484`).
 
 ```powershell
-dotnet build g0v0/osu.Desktop/osu.Desktop.csproj -p:UseLocalVeldrid=true
+dotnet build g0v0/osu.Desktop/osu.Desktop.csproj -p:G0V0SourceVeldrid=true
 $env:OSU_GRAPHICS_SURFACE = 'Vulkan'
 $env:OSU_GRAPHICS_RENDERER = 'veldrid'
 $env:VELDRID_VK_FSE = '1'
 & './g0v0/osu.Desktop/bin/Debug/net10.0/g0v0!.exe' --debug-client-id=9081
 ```
 
-Set `WindowMode = Fullscreen` in the isolated client's `framework.ini` while the application is stopped. Ordinary windowed mode does not acquire FSE. The environment switch is process-local; clear it with `Remove-Item Env:VELDRID_VK_FSE` for ordinary Vulkan. Omit `UseLocalVeldrid=true` and rebuild (including restore) to return to the packaged backend.
+Set `WindowMode = Fullscreen` in the isolated client's `framework.ini` while the application is stopped. Ordinary windowed mode does not acquire FSE. The environment switch is process-local; clear it with `Remove-Item Env:VELDRID_VK_FSE` for ordinary Vulkan. Omit `G0V0SourceVeldrid=true` and rebuild (including restore) to return to the packaged backend.
 
 ## Implementation
 

@@ -141,7 +141,27 @@ dotnet test osu.Framework.Tests/bin/Debug/**/osu.Framework.Tests.dll --no-build 
 
 ---
 
-## 8. 提交与协作
+## 8. 图像编解码依赖与子模块
+
+- 图像层选型：**Wuffs 解码、stb_image_write 编码、Simd 像素处理**。
+- 第三方源码由本框架仓库的 Git submodule 管理：
+  - `native/image-codecs/third_party/wuffs` → `https://github.com/google/wuffs.git`
+  - `native/image-codecs/third_party/stb` → `https://github.com/nothings/stb.git`
+  - `native/image-codecs/third_party/simd` → `https://github.com/ermig1979/Simd.git`
+  - `native/image-codecs/third_party/cpu_features` → `https://github.com/google/cpu_features.git`，用于启动日志中的 CPU 诊断；算法分派沿用 Simd。
+- **版本以父仓库记录的 gitlink 提交为准**。首次克隆及切换父仓库版本后执行：
+  ```bash
+  git submodule update --init --recursive
+  git submodule status --recursive
+  ```
+- CI checkout 初始化所需子模块。`native/image-codecs/CMakeLists.txt` 使用本地子模块源码，缺失时终止并提示初始化命令。Wuffs 编译入口为 `release/c/wuffs-unsupported-snapshot.c`。
+- 更新依赖时先审阅目标提交、格式支持和安全修复，再显式 checkout 固定提交。检查子模块无意外工作区修改，并将对应 gitlink 更新和必要的适配一起提交。不要在第三方目录批量执行本仓库的编码、版权头或格式化规则。
+- 安装产物从 Wuffs 的 `LICENSE-MIT`、stb、Simd 和 cpu_features 的 `LICENSE` 复制许可证，保留第三方许可证内容。
+- 包装层限制输入大小、图像尺寸、像素总数与工作内存，并验证跨语言缓冲区长度及所有权。
+- 图像层覆盖 Windows、Linux、macOS、Android 和 iOS，保留现有格式、透明度、截图及剪贴板能力。
+- **原生工件输出（`.targets`）**：`native/ImageCodecs.targets` 负责将编译产物拷贝到最终消费工程的输出目录。在未指定 `$(RuntimeIdentifier)` 的开发构建（RID-less build）中，必须保留 Windows 桌面（`win-x64`）的默认回退条件，严禁让 `ImageCodecsRid` 留空，否则会导致下游宿主工程缺少动态库并在启动加载字体/图片时抛出 `DllNotFoundException`。
+
+## 9. 提交与协作
 
 - 提交信息沿用上游风格：祈使句、首字母大写、句末不加句号，例如 `Add framework config for error handler`；来自上游的提交保持原样并保留 `(#PR号)`，便于对账。
 - 新分支从 `master` 切出，PR 提到 `GooGuTeam/g0v0-framework`。

@@ -11,7 +11,7 @@
 - Removed obsolete device layer names and unused bookkeeping; instance validation layers remain active.
 - Existing opt-in FSE work is retained. This retest used FSE=0.
 
-Build using `-p:UseLocalVeldrid=true`; default package builds do NOT contain these fixes. The game executable was not rebuilt during this fix pass; the validation target was Framework.Tests.
+Build using `-p:G0V0SourceVeldrid=true`; default package builds do NOT contain these fixes. The game executable was not rebuilt during this fix pass; the validation target was Framework.Tests.
 
 ## Final validation runs
 

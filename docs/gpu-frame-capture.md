@@ -19,7 +19,7 @@ WASAPI recording uses the native PCM tap; the playback callback does not enter a
 
 ## Local build and release boundary
 
-The current joint build uses the sibling Veldrid source and a temporary client-to-framework project reference. These are local integration inputs, not release dependency updates. Framework project changes involving `UseLocalVeldrid`, `LocalVeldridProject` and `G0V0_LOCAL_VELDRID` require explicit review before staging. Published Veldrid/framework packages do not yet contain all APIs used here.
+Build with `-p:G0V0SourceVeldrid=true` (framework) or `-p:G0V0SourceBuild=true` (client) to use the sibling Veldrid source. Published Veldrid/framework packages do not yet contain all APIs used here.
 
 Use `native/build-recording.ps1` for build-only native compilation and explicit deployment with hash verification. The older native build scripts execute probes and are excluded from the current validation workflow.
 
