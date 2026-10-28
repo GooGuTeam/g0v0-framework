@@ -2,6 +2,7 @@
 // See the LICENCE file in the repository root for full licence text.
 
 using System.Threading;
+using NUnit.Framework;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Rendering;
@@ -23,12 +24,21 @@ namespace osu.Framework.Tests.Visual.Graphics
         public TestSceneGpuFrameCapture()
         {
             Add(new Box { RelativeSizeAxes = Axes.Both, Colour = Color4.CornflowerBlue });
-            AddStep("start GPU capture (D3D11/Vulkan only)", () => host.DrawThread.Scheduler.Add(() =>
+            AddStep("start GPU capture (D3D11/Vulkan only)", () =>
             {
-                session?.Dispose();
-                session = ((IGpuFrameCaptureRenderer)host.Renderer).StartGpuFrameCapture(3);
-                Interlocked.Exchange(ref completed, 0);
-            }));
+                if (host.Renderer is not IGpuFrameCaptureRenderer renderer)
+                {
+                    Assert.Ignore("GPU capture is not available");
+                    return;
+                }
+
+                host.DrawThread.Scheduler.Add(() =>
+                {
+                    session?.Dispose();
+                    session = renderer.StartGpuFrameCapture(3);
+                    Interlocked.Exchange(ref completed, 0);
+                });
+            });
             AddStep("poll completed frame", () => host.DrawThread.Scheduler.Add(() =>
             {
                 if (session?.TryAcquireFrame(out var frame) == true)
