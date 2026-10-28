@@ -1,12 +1,12 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using osu.Framework.Graphics.Shaders;
 using osu.Framework.Graphics.Veldrid.Shaders;
 
 namespace osu.Framework.Graphics.Rendering.Deferred
 {
-    internal class DeferredShader : IShader
+    internal class DeferredShader : IShader, IPerVertexMaskingShader
     {
         public VeldridShader Resource { get; }
 
@@ -40,6 +40,8 @@ namespace osu.Framework.Graphics.Rendering.Deferred
             => Resource.IsLoaded;
 
         public bool IsBound { get; private set; }
+
+        public bool UsesPerVertexMasking => Resource.UsesPerVertexMasking;
 
         public void BindUniformBlock(string blockName, IUniformBuffer buffer)
             => renderer.BindUniformBuffer(blockName, buffer);

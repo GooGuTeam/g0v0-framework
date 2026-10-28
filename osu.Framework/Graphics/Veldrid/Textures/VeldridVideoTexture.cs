@@ -1,7 +1,6 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
-using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using osu.Framework.Extensions.ObjectExtensions;
@@ -75,8 +74,8 @@ namespace osu.Framework.Graphics.Veldrid.Textures
                     videoUpload.GetPlaneWidth(i),
                     videoUpload.GetPlaneHeight(i),
                     0,
-                    new IntPtr(videoUpload.Frame->data[i]),
-                    videoUpload.Frame->linesize[i]);
+                    videoUpload.GetPlaneData(i),
+                    videoUpload.GetPlaneStride(i));
             }
         }
 

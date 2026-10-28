@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using osu.Framework.Graphics.Rendering;
@@ -8,7 +8,7 @@ using Veldrid;
 
 namespace osu.Framework.Graphics.Veldrid.Buffers
 {
-    internal interface IVeldridVertexBuffer<in T> : IVertexBuffer, IDisposable
+    internal interface IVeldridVertexBuffer<T> : IVertexBuffer, IDisposable
         where T : unmanaged, IEquatable<T>, IVertex
     {
         /// <summary>
@@ -28,6 +28,12 @@ namespace osu.Framework.Graphics.Veldrid.Buffers
         /// <param name="vertex">The vertex.</param>
         /// <returns>Whether synchronisation for this vertex is required. If true, <see cref="UpdateRange"/> should be called with this vertex included.</returns>
         bool SetVertex(int vertexIndex, T vertex);
+
+        /// <summary>
+        /// Writes consecutive vertices while extending the pending synchronisation range.
+        /// Shared-memory implementations leave the range unchanged because no explicit upload is required.
+        /// </summary>
+        void SetVertices(int vertexIndex, ReadOnlySpan<T> vertices, ref int synchronisationBeginIndex, ref int synchronisationEndIndex);
 
         /// <summary>
         /// Populates the vertices at the specified range to the GPU buffer.

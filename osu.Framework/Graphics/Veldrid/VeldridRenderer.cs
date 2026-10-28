@@ -16,11 +16,11 @@ using osu.Framework.Graphics.Veldrid.Buffers.Staging;
 using osu.Framework.Graphics.Veldrid.Pipelines;
 using osu.Framework.Graphics.Veldrid.Shaders;
 using osu.Framework.Graphics.Veldrid.Textures;
+using osu.Framework.Logging;
 using osu.Framework.Graphics.Veldrid.Vertices;
 using osuTK;
 using osuTK.Graphics;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using osu.Framework.Imaging;
 using Veldrid;
 using PrimitiveTopology = osu.Framework.Graphics.Rendering.PrimitiveTopology;
 
@@ -64,6 +64,10 @@ namespace osu.Framework.Graphics.Veldrid
         public bool UseStructuredBuffers
             => veldridDevice.UseStructuredBuffers;
 
+        public bool UsesBindlessTextures { get; private set; }
+
+        private VeldridTextureTable? textureTable;
+
         public GraphicsDevice Device
             => veldridDevice.Device;
 
@@ -93,13 +97,21 @@ namespace osu.Framework.Graphics.Veldrid
         protected override void Initialise(IGraphicsSurface graphicsSurface)
         {
             initialiseDevice(new VeldridDevice(graphicsSurface, PresentationPreference, VulkanPresentationPreference, RequestVulkanExclusiveFullscreen));
+            VeldridTextureSizeProbe.Run(Device, this);
+            VeldridBindlessTextureProbe.Run(Device, this);
         }
 
-        internal void InitialiseOffline(uint width, uint height)
+        /// <param name="width">The width of the default framebuffer.</param>
+        /// <param name="height">The height of the default framebuffer.</param>
+        /// <param name="depth">Whether the default framebuffer has a depth attachment, like a window's swapchain.</param>
+        internal void InitialiseOffline(uint width, uint height, bool depth = false)
         {
-            initialiseDevice(new VeldridDevice(width, height));
+            initialiseDevice(new VeldridDevice(width, height, depth));
             CompleteInitialisation();
         }
+
+        /// <inheritdoc cref="VeldridDevice.WaitForGpu"/>
+        internal void WaitForGpu() => veldridDevice.WaitForGpu();
 
         internal void DisposeOffline()
         {
@@ -111,6 +123,7 @@ namespace osu.Framework.Graphics.Veldrid
             bufferUpdatePipeline.DisposeAfterGpuIdle();
             textureUploadPipeline.DisposeAfterGpuIdle();
             stagingTexturePool.DisposeAfterGpuIdle();
+            textureTable?.Dispose();
             veldridDevice.DisposeOffline();
         }
 
@@ -123,6 +136,12 @@ namespace osu.Framework.Graphics.Veldrid
             stagingTexturePool = new VeldridStagingTexturePool(graphicsPipeline);
 
             MaxTextureSize = veldridDevice.MaxTextureSize;
+
+            UsesBindlessTextures = VeldridBindlessTextures.IsSupported(device.Device);
+            textureTable = UsesBindlessTextures ? new VeldridTextureTable(this) : null;
+
+            if (VeldridBindlessTextures.Requested)
+                Logger.Log($"Bindless textures: {(UsesBindlessTextures ? $"table of {VeldridBindlessTextures.TABLE_SIZE}" : "unavailable on this device")}");
         }
 
         protected internal override void BeginFrame(Vector2 windowSize)
@@ -169,10 +188,36 @@ namespace osu.Framework.Graphics.Veldrid
         protected override void SetScissorStateImplementation(bool enabled)
             => graphicsPipeline.SetScissorState(enabled);
 
+        // Binding several slots made the game crash with heap corruption shortly after startup on Vulkan (NVIDIA, driver 591.91), in two of three to
+        // four launches, while the offline Vulkan device rendered the same scenes correctly. The cause is not known; the deferred renderer on
+        // Vulkan crashed the same way. The bindless table is a separate path.
+        protected override bool BindsTextureSlots => UsesBindlessTextures || Device.BackendType != GraphicsBackend.Vulkan;
+
+        protected override int TextureSlotCount => UsesBindlessTextures ? VeldridBindlessTextures.TABLE_SIZE : TEXTURE_SLOTS;
+
+        protected override bool UsesNearestFiltering(INativeTexture texture) => texture is VeldridTexture { UsesNearestFiltering: true };
+
+        protected override void BeginTextureSlotDraw()
+        {
+            // The default texture shader samples the table at unit 0, while other shaders sample the texture bound there.
+            if (textureTable != null)
+                graphicsPipeline.AttachResourceSetSource(0, textureTable);
+        }
+
+        protected override void EndTextureSlotDraw()
+        {
+            if (textureTable != null && GetBoundTexture(0) is VeldridTexture bound)
+                graphicsPipeline.AttachTexture(0, bound);
+        }
+
         protected override bool SetTextureImplementation(INativeTexture? texture, int unit)
         {
             if (texture is not VeldridTexture veldridTexture)
                 return false;
+
+            // Units mirror the table's slots, so that the renderer's slot tracking applies to both.
+            if (textureTable != null && unit < VeldridBindlessTextures.TABLE_SIZE)
+                textureTable.Set(unit, veldridTexture);
 
             graphicsPipeline.AttachTexture(unit, veldridTexture);
             return true;
@@ -220,6 +265,9 @@ namespace osu.Framework.Graphics.Veldrid
         public void BindVertexBuffer<T>(IVeldridVertexBuffer<T> buffer)
             where T : unmanaged, IEquatable<T>, IVertex
             => graphicsPipeline.SetVertexBuffer(buffer.Buffer, VeldridVertexUtils<T>.Layout);
+
+        internal void BindStaticVertexBuffer(DeviceBuffer buffer, VertexLayoutDescription layout)
+            => graphicsPipeline.SetVertexBuffer(buffer, layout);
 
         public void BindIndexBuffer(VeldridIndexLayout layout, int verticesCount)
         {
@@ -321,6 +369,9 @@ namespace osu.Framework.Graphics.Veldrid
         public void GenerateMipmaps(VeldridTexture texture)
             => graphicsPipeline.GenerateMipmaps(texture);
 
+        public void GenerateMipmaps(VeldridTexture texture, RectangleI region)
+            => VeldridTexture.GenerateRegionMipmaps(this, graphicsPipeline.Commands, texture, region);
+
         public CommandList BufferUpdateCommands
             => bufferUpdatePipeline.Commands;
 
@@ -357,8 +408,8 @@ namespace osu.Framework.Graphics.Veldrid
             => new VeldridShaderStorageBufferObject<TData>(this, uboSize, ssboSize);
 
         protected override INativeTexture CreateNativeTexture(int width, int height, bool manualMipmaps = false, TextureFilteringMode filteringMode = TextureFilteringMode.Linear,
-                                                              Color4? initialisationColour = null)
-            => new VeldridTexture(this, width, height, TexturePixelFormat.R8G8B8A8Float, manualMipmaps, filteringMode, initialisationColour);
+                                                              Color4? initialisationColour = null, TexturePixelFormat textureFormat = TexturePixelFormat.R8G8B8A8Float)
+            => new VeldridTexture(this, width, height, textureFormat, manualMipmaps, filteringMode, initialisationColour);
 
         protected override INativeTexture CreateNativeVideoTexture(int width, int height)
             => new VeldridVideoTexture(this, width, height);

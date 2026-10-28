@@ -56,11 +56,11 @@ namespace osu.Framework.Audio.Callbacks
         private unsafe void capture(IntPtr buffer, int length)
         {
             var capture = hub.Current;
-            if (capture == null || capture.IsDisposed || length <= 0 || length % (sizeof(float) * MixerAudioCapture.Channels) != 0)
+            if (capture == null || capture.IsDisposed || length <= 0 || length % (sizeof(float) * MixerAudioCapture.CHANNELS) != 0)
                 return;
 
-            int frames = length / (sizeof(float) * MixerAudioCapture.Channels);
-            long end = (long)((Stopwatch.GetTimestamp() - capture.StartTimestamp) * (double)MixerAudioCapture.SampleRate / Stopwatch.Frequency);
+            int frames = length / (sizeof(float) * MixerAudioCapture.CHANNELS);
+            long end = (long)((Stopwatch.GetTimestamp() - capture.StartTimestamp) * (double)MixerAudioCapture.SAMPLE_RATE / Stopwatch.Frequency);
             long measuredStart = end - frames;
             // Re-anchor after a new recording or stalled device. Small scheduling jitter
             // must not create gaps between otherwise contiguous DSP blocks.
@@ -69,7 +69,7 @@ namespace osu.Framework.Audio.Callbacks
                 epoch = capture;
                 nextPosition = measuredStart;
             }
-            else if (measuredStart - nextPosition > MixerAudioCapture.SampleRate / 50)
+            else if (measuredStart - nextPosition > MixerAudioCapture.SAMPLE_RATE / 50)
             {
                 nextPosition = measuredStart;
             }
@@ -83,7 +83,7 @@ namespace osu.Framework.Audio.Callbacks
                 if (index - Volatile.Read(ref read) < capacity)
                 {
                     Block block = blocks[index % capacity];
-                    new ReadOnlySpan<float>(samples + offset * MixerAudioCapture.Channels, count * MixerAudioCapture.Channels).CopyTo(block.Samples);
+                    new ReadOnlySpan<float>(samples + offset * MixerAudioCapture.CHANNELS, count * MixerAudioCapture.CHANNELS).CopyTo(block.Samples);
                     block.Capture = capture;
                     block.Position = nextPosition;
                     block.Frames = count;
@@ -111,8 +111,8 @@ namespace osu.Framework.Audio.Callbacks
                 long last = Math.Min(end, block.Position + block.Frames);
                 for (long sample = first; sample < last; sample++)
                 {
-                    int input = (int)(sample - block.Position) * MixerAudioCapture.Channels;
-                    int output = (int)(sample - position) * MixerAudioCapture.Channels;
+                    int input = (int)(sample - block.Position) * MixerAudioCapture.CHANNELS;
+                    int output = (int)(sample - position) * MixerAudioCapture.CHANNELS;
                     destination[output] += block.Samples[input];
                     destination[output + 1] += block.Samples[input + 1];
                 }
@@ -123,7 +123,7 @@ namespace osu.Framework.Audio.Callbacks
 
         private sealed class Block
         {
-            public readonly float[] Samples = new float[block_frames * MixerAudioCapture.Channels];
+            public readonly float[] Samples = new float[block_frames * MixerAudioCapture.CHANNELS];
             public MixerAudioCapture? Capture;
             public long Position;
             public int Frames;

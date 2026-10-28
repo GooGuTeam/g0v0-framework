@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System.Collections.Generic;
 using osu.Framework.Input;
@@ -13,7 +13,6 @@ using osu.Framework.Input.Handlers.Tablet;
 using osu.Framework.Input.Handlers.Touch;
 using osu.Framework.Platform.SDL2;
 using osu.Framework.Platform.SDL3;
-using SixLabors.ImageSharp.Formats.Png;
 
 namespace osu.Framework.Platform
 {
@@ -38,7 +37,7 @@ namespace osu.Framework.Platform
 
         protected override Clipboard CreateClipboard()
             => FrameworkEnvironment.UseSDL3
-                ? new SDL3Clipboard(PngFormat.Instance) // PNG works well on linux
+                ? new SDL3Clipboard() // PNG works well on linux
                 : new SDL2Clipboard();
 
         protected override IEnumerable<InputHandler> CreateAvailableInputHandlers()

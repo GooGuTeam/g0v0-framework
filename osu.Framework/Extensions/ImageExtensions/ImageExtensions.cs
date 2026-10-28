@@ -1,10 +1,8 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System.Buffers;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Advanced;
-using SixLabors.ImageSharp.PixelFormats;
+using osu.Framework.Imaging;
 
 namespace osu.Framework.Extensions.ImageExtensions
 {
@@ -50,7 +48,7 @@ namespace osu.Framework.Extensions.ImageExtensions
         internal static IMemoryOwner<TPixel> CreateContiguousMemory<TPixel>(this Image<TPixel> image)
             where TPixel : unmanaged, IPixel<TPixel>
         {
-            var allocatedOwner = SixLabors.ImageSharp.Configuration.Default.MemoryAllocator.Allocate<TPixel>(image.Width * image.Height);
+            var allocatedOwner = new osu.Framework.Allocation.PooledMemoryOwner<TPixel>(image.Width * image.Height);
             var allocatedMemory = allocatedOwner.Memory;
 
             for (int r = 0; r < image.Height; r++)

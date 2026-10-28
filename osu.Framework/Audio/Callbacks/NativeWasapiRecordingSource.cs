@@ -14,11 +14,11 @@ namespace osu.Framework.Audio.Callbacks
     /// </summary>
     internal sealed class NativeWasapiRecordingSource : IDisposable
     {
-        private const int capacity = MixerAudioCapture.SampleRate * 2;
+        private const int capacity = MixerAudioCapture.SAMPLE_RATE * 2;
         private static int owned;
         private readonly object sync = new object();
         private readonly byte[] buffer = new byte[65536];
-        private readonly float[] samples = new float[capacity * MixerAudioCapture.Channels];
+        private readonly float[] samples = new float[capacity * MixerAudioCapture.CHANNELS];
         private readonly long[] positions = new long[capacity];
         private readonly ManualResetEventSlim stop = new ManualResetEventSlim();
         private readonly Thread reader;
@@ -83,12 +83,12 @@ namespace osu.Framework.Audio.Callbacks
                 || block.Length == 0 || block.Length > buffer.Length || block.Length % (block.Channels * sizeof(float)) != 0)
                 return;
 
-            double ratio = (double)MixerAudioCapture.SampleRate / block.Frequency;
+            double ratio = (double)MixerAudioCapture.SAMPLE_RATE / block.Frequency;
             int channels = (int)block.Channels;
             int count = (int)(block.Length / (block.Channels * sizeof(float)));
-            double measuredStart = (block.Qpc - startTimestamp) * (double)MixerAudioCapture.SampleRate / Stopwatch.Frequency - count * ratio;
+            double measuredStart = (block.Qpc - startTimestamp) * (double)MixerAudioCapture.SAMPLE_RATE / Stopwatch.Frequency - count * ratio;
             double mappedStart = origin + block.SamplePosition * ratio;
-            if (generation != currentGeneration || measuredStart - mappedStart > MixerAudioCapture.SampleRate / 50)
+            if (generation != currentGeneration || measuredStart - mappedStart > MixerAudioCapture.SAMPLE_RATE / 50)
             {
                 origin = Math.Max(nextPosition, measuredStart) - block.SamplePosition * ratio;
                 generation = currentGeneration;
@@ -103,19 +103,19 @@ namespace osu.Framework.Audio.Callbacks
                 // Absolute position tags prevent wrapped, stale audio from being replayed after a stall.
                 for (long sample = Math.Max(0, Math.Max(firstOutput, endOutput - capacity)); sample < endOutput; sample++)
                 {
-                    double sourcePosition = (sample - origin) * block.Frequency / MixerAudioCapture.SampleRate - block.SamplePosition;
+                    double sourcePosition = (sample - origin) * block.Frequency / MixerAudioCapture.SAMPLE_RATE - block.SamplePosition;
                     sourcePosition = Math.Clamp(sourcePosition, 0, count - 1);
                     int first = (int)sourcePosition;
                     int second = Math.Min(first + 1, count - 1);
                     float fraction = (float)(sourcePosition - first);
                     int slot = (int)(sample % capacity);
-                    for (int channel = 0; channel < MixerAudioCapture.Channels; channel++)
+                    for (int channel = 0; channel < MixerAudioCapture.CHANNELS; channel++)
                     {
                         // Mono is duplicated; multichannel devices contribute their front stereo pair.
                         int inputChannel = Math.Min(channel, channels - 1);
                         float a = input[first * channels + inputChannel];
                         float b = input[second * channels + inputChannel];
-                        samples[slot * MixerAudioCapture.Channels + channel] = a + (b - a) * fraction;
+                        samples[slot * MixerAudioCapture.CHANNELS + channel] = a + (b - a) * fraction;
                     }
                     positions[slot] = sample;
                 }

@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -154,9 +154,14 @@ namespace osu.Framework.Graphics.Veldrid.Shaders
         /// This creates a new <see cref="VeldridShaderPart"/> rather than altering this existing instance since this is cached at a <see cref="IShaderStore"/> level and should remain immutable.
         /// </para>
         /// </remarks>
-        /// <param name="attributes">The list of attributes to include in the shader as input &amp; output.</param>
-        public VeldridShaderPart WithPassthroughInput(IReadOnlyList<VeldridShaderAttribute> attributes)
+        /// <param name="attributes">The vertex outputs the fragment shader should declare as inputs.</param>
+        /// <param name="undeclaredInputs">Input locations the fragment shader's source declares but preprocesses away.</param>
+        /// <param name="declareOutputs">Whether to also copy each added input to a new fragment output, so that it is not optimised away.</param>
+        public VeldridShaderPart WithPassthroughInput(IReadOnlyList<VeldridShaderAttribute> attributes, IReadOnlyCollection<int>? undeclaredInputs = null,
+                                                      bool declareOutputs = true)
         {
+            var inputs = undeclaredInputs == null ? Inputs : Inputs.Where(i => !undeclaredInputs.Contains(i.Location)).ToList();
+
             string result = code;
 
             int outputLayoutIndex = Outputs.Max(m => m.Location) + 1;
@@ -167,13 +172,17 @@ namespace osu.Framework.Graphics.Veldrid.Shaders
 
             foreach (VeldridShaderAttribute attribute in attributes)
             {
-                if (Inputs.Any(i => attribute.Location == i.Location))
+                if (inputs.Any(i => attribute.Location == i.Location))
                     continue;
 
                 string inputName = $"__unused_input_{attribute.Location}";
                 string outputName = $"__unused_output_{outputLayoutIndex}";
 
                 attributesLayout.AppendLine($"layout (location = {attribute.Location}) in {attribute.Type} {inputName};");
+
+                if (!declareOutputs)
+                    continue;
+
                 attributesLayout.AppendLine($"layout (location = {outputLayoutIndex}) out {attribute.Type} {outputName};");
                 attributesAssignment.Append($"{outputName} = {inputName};\n    ");
 
@@ -187,7 +196,7 @@ namespace osu.Framework.Graphics.Veldrid.Shaders
             result = result.Replace("{{ fragment_output_assignment }}", attributesAssignment.ToString().Trim());
 
             var part = new VeldridShaderPart(result, header, Type, store);
-            part.Inputs.AddRange(Inputs.Concat(attributes).DistinctBy(a => a.Location));
+            part.Inputs.AddRange(inputs.Concat(attributes).DistinctBy(a => a.Location));
             part.Outputs.AddRange(Outputs.Concat(outputAttributes));
             return part;
         }

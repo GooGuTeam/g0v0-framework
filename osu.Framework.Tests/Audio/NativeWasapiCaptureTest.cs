@@ -2,9 +2,9 @@
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
-using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using ManagedBass;
 using ManagedBass.Mix;
@@ -30,7 +30,7 @@ namespace osu.Framework.Tests.Audio
             try
             {
                 bassLibrary = NativeLibrary.Load(Path.Combine(AppContext.BaseDirectory, "runtimes", "win-x64", "native", "bass.dll"));
-                Assert.That(NativeWasapiCapture.TryCreate(NativeLibrary.GetExport(bassLibrary, "BASS_ChannelGetData"), out var callback, out var context), Is.True);
+                Assert.That(NativeWasapiCapture.TryCreate(NativeLibrary.GetExport(bassLibrary, "BASS_ChannelGetData"), out nint callback, out nint context), Is.True);
                 Assert.That(BassWasapi.InitEx(-1, 48000, 2, WasapiInitFlags.Exclusive | WasapiInitFlags.EventDriven | WasapiInitFlags.AutoFormat,
                     0.01f, 0.005f, callback, context), Is.True, $"WASAPI init: {Bass.LastError}");
                 Assert.That(BassWasapi.GetInfo(out var info), Is.True);
@@ -88,7 +88,7 @@ namespace osu.Framework.Tests.Audio
         public void TestNativeInteropAndDeviceReset()
         {
             MixCallback mixer = mix;
-            Assert.That(NativeWasapiCapture.TryCreate(Marshal.GetFunctionPointerForDelegate(mixer), out var callback, out var context), Is.True);
+            Assert.That(NativeWasapiCapture.TryCreate(Marshal.GetFunctionPointerForDelegate(mixer), out nint callback, out nint context), Is.True);
             IntPtr pcm = Marshal.AllocHGlobal(32);
             try
             {

@@ -2,8 +2,8 @@
 // See the LICENCE file in the repository root for full licence text.
 #pragma once
 
-// Worker-thread-owned converter. Input scratch is reused only after the worker's
-// conversion fence completes; output slots are reused only after tracked samples release.
+// Worker-thread-owned converter. Input scratch is reused in immediate-context order, after the
+// previous conversion; output slots are reused only after tracked samples release.
 class PooledConverter {
     ID3D11VideoDevice *video = nullptr;
     ID3D11VideoContext *context = nullptr;

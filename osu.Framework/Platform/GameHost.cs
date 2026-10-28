@@ -25,13 +25,16 @@ using osu.Framework.Extensions.ExceptionExtensions;
 using osu.Framework.Extensions.IEnumerableExtensions;
 using osu.Framework.Extensions.TypeExtensions;
 using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.OpenGL;
+using osu.Framework.Graphics.Primitives;
 using osu.Framework.Graphics.Rendering;
 using osu.Framework.Graphics.Rendering.Deferred;
 using osu.Framework.Graphics.Textures;
 using osu.Framework.Graphics.Veldrid;
 using osu.Framework.Graphics.Video;
+using osu.Framework.Imaging;
 using osu.Framework.Input;
 using osu.Framework.Input.Bindings;
 using osu.Framework.Input.Handlers;
@@ -43,8 +46,7 @@ using osu.Framework.Statistics;
 using osu.Framework.Threading;
 using osu.Framework.Timing;
 using osuTK;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using osuTK.Graphics;
 using Rectangle = System.Drawing.Rectangle;
 using Size = System.Drawing.Size;
 
@@ -222,6 +224,9 @@ namespace osu.Framework.Platform
         /// </summary>
         public Storage CacheStorage { get; protected set; }
 
+        /// <summary>Clears compatibility observations; the next startup repeats the integrated graphics probes.</summary>
+        public void ClearGraphicsProbeCache() => new GraphicsProbeCache(CacheStorage.GetStorageForDirectory("graphics-probes")).Clear();
+
         /// <summary>
         /// If caps-lock is enabled on the system, false if not overwritten by a subclass
         /// </summary>
@@ -355,7 +360,6 @@ namespace osu.Framework.Platform
         /// </summary>
         public void Collect()
         {
-            SixLabors.ImageSharp.Configuration.Default.MemoryAllocator.ReleaseRetainedResources();
             GC.Collect();
         }
 
@@ -485,26 +489,30 @@ namespace osu.Framework.Platform
 
         protected virtual void DrawFrame()
         {
-            Debug.Assert(Window != null);
-
             if (Root == null)
                 return;
 
             if (ExecutionState != ExecutionState.Running)
                 return;
 
-            if (Window.WindowState == WindowState.Minimised)
+            if (Window?.WindowState == WindowState.Minimised)
                 return;
 
             // Do *not* allow tearing when VRR enabled, not even in fullscreen via mechanisms like FifoRelaxed, to ensure we can pace
             // the monitor's refresh cycle correctly.
             bool isVrr = frameSyncMode.Value == FrameSync.VSyncVRR;
-            if (Renderer is Renderer presentationRenderer)
+
+            // Presentation settings apply to the window's swapchain; offscreen renderers have none.
+            if (Window != null)
             {
-                presentationRenderer.FullscreenRefreshRate = Window.CurrentDisplayMode.Value.RefreshRate;
-                presentationRenderer.ExclusiveFullscreenAllowed = windowMode.Value == WindowMode.Fullscreen;
+                if (Renderer is Renderer presentationRenderer)
+                {
+                    presentationRenderer.FullscreenRefreshRate = Window.CurrentDisplayMode.Value.RefreshRate;
+                    presentationRenderer.ExclusiveFullscreenAllowed = windowMode.Value == WindowMode.Fullscreen;
+                }
+
+                Renderer.AllowTearing = windowMode.Value == WindowMode.Fullscreen && !isVrr;
             }
-            Renderer.AllowTearing = windowMode.Value == WindowMode.Fullscreen && !isVrr;
 
             TripleBuffer<DrawNode>.Buffer buffer;
 
@@ -514,7 +522,8 @@ namespace osu.Framework.Platform
                 // Without this, the wait handle, internally used in the Veldrid-side implementation of `WaitUntilNextFrameReady()`,
                 // will potentially be in a bad state and take the timeout value (1 second) to recover.
                 // Furthermore, don't wait when in VRR mode as we want to be the ones in control of pacing the monitor's refresh cycle.
-                if (didRenderFrame && !isVrr)
+                // There is no swapchain to wait on without a window.
+                if (didRenderFrame && !isVrr && Window != null)
                     Renderer.WaitUntilNextFrameReady();
 
                 didRenderFrame = false;
@@ -528,8 +537,36 @@ namespace osu.Framework.Platform
 
             try
             {
+                var windowSize = BackbufferSize;
+
                 using (drawMonitor.BeginCollecting(PerformanceCollectionType.DrawReset))
-                    Renderer.BeginFrame(new Vector2(Window.ClientSize.Width, Window.ClientSize.Height));
+                    Renderer.BeginFrame(windowSize);
+
+                float scale = Math.Clamp(renderScale?.Value ?? 1.0f, 0.25f, 1.0f);
+                bool isScaled = scale < 0.999f;
+
+                if (isScaled)
+                {
+                    int scaledWidth = Math.Max(1, (int)Math.Round(windowSize.X * scale));
+                    int scaledHeight = Math.Max(1, (int)Math.Round(windowSize.Y * scale));
+                    var scaledSize = new Vector2(scaledWidth, scaledHeight);
+
+                    if (scaledRenderBuffer == null)
+                        scaledRenderBuffer = Renderer.CreateFrameBuffer(renderBufferFormats: new[] { RenderBufferFormat.D16 }, filteringMode: TextureFilteringMode.Linear);
+
+                    scaledRenderBuffer.Size = scaledSize;
+
+                    scaledRenderBuffer.Bind();
+                    Renderer.PushViewport(new RectangleI(0, 0, scaledWidth, scaledHeight));
+                    Renderer.PushScissor(new RectangleI(0, 0, scaledWidth, scaledHeight));
+                    Renderer.PushOrtho(new osu.Framework.Graphics.Primitives.RectangleF(0, 0, windowSize.X, windowSize.Y));
+                    Renderer.Clear(new ClearInfo(Color4.Black));
+                }
+                else if (scaledRenderBuffer != null)
+                {
+                    scaledRenderBuffer.Dispose();
+                    scaledRenderBuffer = null;
+                }
 
                 if (!bypassFrontToBackPass.Value)
                 {
@@ -558,12 +595,28 @@ namespace osu.Framework.Platform
 
                 Renderer.PopDepthInfo();
 
+                if (isScaled && scaledRenderBuffer != null)
+                {
+                    Renderer.PopOrtho();
+                    Renderer.PopScissor();
+                    Renderer.PopViewport();
+                    scaledRenderBuffer.Unbind();
+
+                    var blitShader = ((Renderer)Renderer).GetBlitShader();
+                    blitShader.Bind();
+                    Renderer.SetBlend(BlendingParameters.None);
+                    Renderer.PushDepthInfo(new DepthInfo(false, false));
+                    Renderer.DrawFrameBuffer(scaledRenderBuffer, new Quad(0, 0, windowSize.X, windowSize.Y), ColourInfo.SingleColour(Color4.White));
+                    Renderer.PopDepthInfo();
+                    blitShader.Unbind();
+                }
+
                 Renderer.FinishFrame();
 
                 using (drawMonitor.BeginCollecting(PerformanceCollectionType.SwapBuffer))
                     Swap();
 
-                Window.OnDraw();
+                Window?.OnDraw();
                 didRenderFrame = true;
             }
             finally
@@ -571,6 +624,11 @@ namespace osu.Framework.Platform
                 buffer.Dispose();
             }
         }
+
+        /// <summary>
+        /// The size of the backbuffer drawn each frame.
+        /// </summary>
+        protected virtual Vector2 BackbufferSize => new Vector2(Window.ClientSize.Width, Window.ClientSize.Height);
 
         /// <summary>
         /// Swap the buffers.
@@ -1015,6 +1073,21 @@ namespace osu.Framework.Platform
 
             try
             {
+                // Applied before window creation, so that renderers initialised without a window (see OffscreenGameHost) use the same settings.
+                if (Renderer is Renderer configurableRenderer)
+                {
+                    if (Config.Get<bool>(FrameworkSetting.ClearGraphicsProbeCache))
+                    {
+                        ClearGraphicsProbeCache();
+                        Config.SetValue(FrameworkSetting.ClearGraphicsProbeCache, false);
+                    }
+                    configurableRenderer.GraphicsProbeCache = new GraphicsProbeCache(CacheStorage.GetStorageForDirectory("graphics-probes"));
+                    FrameworkFeatureFlags.ApplyTo(configurableRenderer);
+                    configurableRenderer.PresentationPreference = Config.Get<PresentationPreference>(FrameworkSetting.PresentationPreference);
+                    configurableRenderer.VulkanPresentationPreference = Config.Get<VulkanPresentationPreference>(FrameworkSetting.VulkanPresentationPreference);
+                    configurableRenderer.RequestVulkanExclusiveFullscreen = Config.Get<bool>(FrameworkSetting.RequestVulkanExclusiveFullscreen);
+                }
+
                 // Prepare window
                 Window = CreateWindow(surfaceType);
 
@@ -1030,13 +1103,6 @@ namespace osu.Framework.Platform
                 Window.SetupWindow(Config);
                 Window.Create();
                 Window.Title = Options.FriendlyGameName;
-
-                if (Renderer is Renderer configurableRenderer)
-                {
-                    configurableRenderer.PresentationPreference = Config.Get<PresentationPreference>(FrameworkSetting.PresentationPreference);
-                    configurableRenderer.VulkanPresentationPreference = Config.Get<VulkanPresentationPreference>(FrameworkSetting.VulkanPresentationPreference);
-                    configurableRenderer.RequestVulkanExclusiveFullscreen = Config.Get<bool>(FrameworkSetting.RequestVulkanExclusiveFullscreen);
-                }
 
                 Renderer.Initialise(Window.GraphicsSurface);
 
@@ -1218,6 +1284,8 @@ namespace osu.Framework.Platform
         private InvokeOnDisposal inputPerformanceCollectionPeriod;
 
         private Bindable<bool> bypassFrontToBackPass;
+        private Bindable<float> renderScale;
+        private IFrameBuffer scaledRenderBuffer;
 
         private Bindable<FrameSync> frameSyncMode;
 
@@ -1242,6 +1310,7 @@ namespace osu.Framework.Platform
 
             Dependencies.Cache(DebugConfig = new FrameworkDebugConfigManager());
             Dependencies.Cache(Config = new FrameworkConfigManager(Storage, defaultOverrides));
+            FrameworkFeatureFlags.Apply(Config);
 
             windowMode = Config.GetBindable<WindowMode>(FrameworkSetting.WindowMode);
             windowMode.BindValueChanged(mode =>
@@ -1307,13 +1376,11 @@ namespace osu.Framework.Platform
             // accounts for this, so tests remain unaffected even without this guard.
             if (!DebugUtils.IsNUnitRunning)
             {
-                var loadErrorPlaceholders = Config.GetBindable<bool>(FrameworkSetting.LoadErrorPlaceholders);
-
-                LoadErrorHandling.Enabled = loadErrorPlaceholders.Value;
-                loadErrorPlaceholders.BindValueChanged(placeholders => LoadErrorHandling.Enabled = placeholders.NewValue);
+                LoadErrorHandling.Enabled = Config.Get<bool>(FrameworkSetting.LoadErrorPlaceholders);
             }
 
             bypassFrontToBackPass = DebugConfig.GetBindable<bool>(DebugSetting.BypassFrontToBackPass);
+            renderScale = Config.GetBindable<float>(FrameworkSetting.RenderScale);
 
             threadLocale = Config.GetBindable<string>(FrameworkSetting.Locale);
             threadLocale.BindValueChanged(locale =>
@@ -1382,6 +1449,12 @@ namespace osu.Framework.Platform
                     break;
             }
 
+            // Mobile displays show at most one frame per refresh, yet the multi-threaded limits above update up to four times per refresh.
+            // That keeps a big core busy and heats the device into thermal throttling, which then costs displayed frames.
+            // Twice the refresh rate matches what single-threaded execution (the mobile default) already uses, and still samples touch input above display rate.
+            if (RuntimeInfo.IsMobile && frameSyncMode.Value != FrameSync.Unlimited)
+                updateLimiter = Math.Min(updateLimiter, refreshRate * 2);
+
             MaximumDrawHz = drawLimiter;
             MaximumUpdateHz = executionMode.Value == ExecutionMode.SingleThread ? drawLimiter : updateLimiter;
         }
@@ -1433,6 +1506,8 @@ namespace osu.Framework.Platform
             TaskScheduler.UnobservedTaskException -= unobservedExceptionHandler;
 
             Root?.Dispose();
+            scaledRenderBuffer?.Dispose();
+            scaledRenderBuffer = null;
             Root = null;
 
             stoppedEvent.Dispose();

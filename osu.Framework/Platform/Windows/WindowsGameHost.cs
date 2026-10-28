@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -11,6 +11,7 @@ using System.Text;
 using osu.Framework.Extensions;
 using osu.Framework.Extensions.IEnumerableExtensions;
 using osu.Framework.Graphics.Rendering;
+using osu.Framework.Graphics.Video;
 using osu.Framework.Input;
 using osu.Framework.Input.Bindings;
 using osu.Framework.Input.Handlers;
@@ -75,6 +76,9 @@ namespace osu.Framework.Platform.Windows
         }
 
         protected override IRenderer CreateGLRenderer() => new WindowsGLRenderer(this);
+
+        public override VideoDecoder CreateVideoDecoder(Stream stream)
+            => MediaFoundationVideoDecoder.IsAvailable ? new MediaFoundationVideoDecoder(Renderer, stream) : base.CreateVideoDecoder(stream);
 
         protected override void SetupForRun()
         {

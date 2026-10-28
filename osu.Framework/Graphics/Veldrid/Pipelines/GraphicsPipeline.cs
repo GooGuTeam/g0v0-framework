@@ -21,9 +21,11 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
         private static readonly GlobalStatistic<int> stat_graphics_pipeline_created = GlobalStatistics.Get<int>(nameof(VeldridRenderer), "Total pipelines created");
 
         private readonly Dictionary<GraphicsPipelineDescription, Pipeline> pipelineCache = new Dictionary<GraphicsPipelineDescription, Pipeline>();
-        private readonly Dictionary<int, VeldridTextureResources> attachedTextures = new Dictionary<int, VeldridTextureResources>();
+        private readonly Dictionary<int, IVeldridResourceSetSource> attachedTextures = new Dictionary<int, IVeldridResourceSetSource>();
         private readonly Dictionary<string, IVeldridUniformBuffer> attachedUniformBuffers = new Dictionary<string, IVeldridUniformBuffer>();
         private readonly Dictionary<IVeldridUniformBuffer, uint> uniformBufferOffsets = new Dictionary<IVeldridUniformBuffer, uint>();
+        private readonly List<(int Unit, VeldridUniformLayout Layout)> activeTextureLayouts = new List<(int, VeldridUniformLayout)>();
+        private readonly List<(string Name, VeldridUniformLayout Layout)> activeUniformLayouts = new List<(string, VeldridUniformLayout)>();
 
         private GraphicsPipelineDescription pipelineDesc = new GraphicsPipelineDescription
         {
@@ -42,6 +44,8 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
         private VeldridIndexBuffer? currentIndexBuffer;
         private DeviceBuffer? currentVertexBuffer;
         private VertexLayoutDescription currentVertexLayout;
+        private Pipeline? currentPipeline;
+        private bool resourceLayoutsChanged = true;
 
         public GraphicsPipeline(VeldridDevice device)
             : base(device)
@@ -55,9 +59,12 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
             foreach (var pipeline in pipelineCache.Values)
                 pipeline.Dispose();
             pipelineCache.Clear();
+            currentPipeline = null;
             attachedTextures.Clear();
             attachedUniformBuffers.Clear();
             uniformBufferOffsets.Clear();
+            activeTextureLayouts.Clear();
+            activeUniformLayouts.Clear();
         }
 
         public override void Begin()
@@ -67,10 +74,14 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
             attachedTextures.Clear();
             attachedUniformBuffers.Clear();
             uniformBufferOffsets.Clear();
+            activeTextureLayouts.Clear();
+            activeUniformLayouts.Clear();
             currentFrameBuffer = null;
             currentShader = null;
             currentIndexBuffer = null;
             currentVertexBuffer = null;
+            currentPipeline = null;
+            resourceLayoutsChanged = true;
         }
 
         /// <summary>
@@ -91,7 +102,10 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
         /// </summary>
         /// <param name="enabled">Whether the scissor test is enabled.</param>
         public void SetScissorState(bool enabled)
-            => pipelineDesc.RasterizerState.ScissorTestEnabled = enabled;
+        {
+            pipelineDesc.RasterizerState.ScissorTestEnabled = enabled;
+            currentPipeline = null;
+        }
 
         /// <summary>
         /// Sets the active shader.
@@ -103,6 +117,8 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
 
             currentShader = shader;
             pipelineDesc.ShaderSet.Shaders = shader.Shaders;
+            currentPipeline = null;
+            resourceLayoutsChanged = true;
         }
 
         /// <summary>
@@ -118,6 +134,7 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
             pipelineDesc.BlendState.AttachmentStates[0].DestinationAlphaFactor = blendingParameters.DestinationAlpha.ToBlendFactor();
             pipelineDesc.BlendState.AttachmentStates[0].ColorFunction = blendingParameters.RGBEquation.ToBlendFunction();
             pipelineDesc.BlendState.AttachmentStates[0].AlphaFunction = blendingParameters.AlphaEquation.ToBlendFunction();
+            currentPipeline = null;
         }
 
         /// <summary>
@@ -125,7 +142,10 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
         /// </summary>
         /// <param name="blendingMask">The blending mask.</param>
         public void SetBlendMask(BlendingMask blendingMask)
-            => pipelineDesc.BlendState.AttachmentStates[0].ColorWriteMask = blendingMask.ToColorWriteMask();
+        {
+            pipelineDesc.BlendState.AttachmentStates[0].ColorWriteMask = blendingMask.ToColorWriteMask();
+            currentPipeline = null;
+        }
 
         /// <summary>
         /// Sets the active viewport rectangle.
@@ -150,6 +170,7 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
             pipelineDesc.DepthStencilState.DepthTestEnabled = depthInfo.DepthTest;
             pipelineDesc.DepthStencilState.DepthWriteEnabled = depthInfo.WriteDepth;
             pipelineDesc.DepthStencilState.DepthComparison = depthInfo.Function.ToComparisonKind();
+            currentPipeline = null;
         }
 
         /// <summary>
@@ -165,6 +186,7 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
             pipelineDesc.DepthStencilState.StencilBack.Fail = pipelineDesc.DepthStencilState.StencilFront.Fail = stencilInfo.StencilTestFailOperation.ToStencilOperation();
             pipelineDesc.DepthStencilState.StencilBack.DepthFail = pipelineDesc.DepthStencilState.StencilFront.DepthFail = stencilInfo.DepthTestFailOperation.ToStencilOperation();
             pipelineDesc.DepthStencilState.StencilBack.Comparison = pipelineDesc.DepthStencilState.StencilFront.Comparison = stencilInfo.TestFunction.ToComparisonKind();
+            currentPipeline = null;
         }
 
         /// <summary>
@@ -179,6 +201,7 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
 
             Commands.SetFramebuffer(fb);
             pipelineDesc.Outputs = fb.OutputDescription;
+            currentPipeline = null;
         }
 
         /// <summary>
@@ -188,11 +211,16 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
         /// <param name="layout">The layout of vertices in the buffer.</param>
         public void SetVertexBuffer(DeviceBuffer buffer, VertexLayoutDescription layout)
         {
-            if (buffer == currentVertexBuffer && layout.Equals(currentVertexLayout))
+            bool layoutChanged = !layout.Equals(currentVertexLayout);
+            if (buffer == currentVertexBuffer && !layoutChanged)
                 return;
 
             Commands.SetVertexBuffer(0, buffer);
             pipelineDesc.ShaderSet.VertexLayouts[0] = layout;
+
+            // Rotating buffers with the same vertex layout does not change the pipeline.
+            if (layoutChanged)
+                currentPipeline = null;
 
             FrameStatistics.Increment(StatisticsCounterType.VBufBinds);
 
@@ -223,7 +251,25 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
             var resources = texture.GetResourceList();
 
             for (int i = 0; i < resources.Count; i++)
-                attachedTextures[unit++] = resources[i];
+            {
+                if (attachedTextures.TryAdd(unit, resources[i]))
+                    resourceLayoutsChanged = true;
+                else
+                    attachedTextures[unit] = resources[i];
+
+                unit++;
+            }
+        }
+
+        /// <summary>
+        /// Attaches a resource set source (such as a bindless texture table) to the pipeline at the given texture unit.
+        /// </summary>
+        public void AttachResourceSetSource(int unit, IVeldridResourceSetSource source)
+        {
+            if (attachedTextures.TryAdd(unit, source))
+                resourceLayoutsChanged = true;
+            else
+                attachedTextures[unit] = source;
         }
 
         /// <summary>
@@ -232,7 +278,12 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
         /// <param name="name">The uniform block name.</param>
         /// <param name="buffer">The uniform buffer.</param>
         public void AttachUniformBuffer(string name, IVeldridUniformBuffer buffer)
-            => attachedUniformBuffers[name] = buffer;
+        {
+            if (attachedUniformBuffers.TryAdd(name, buffer))
+                resourceLayoutsChanged = true;
+            else
+                attachedUniformBuffers[name] = buffer;
+        }
 
         /// <summary>
         /// Sets the offset of a uniform buffer.
@@ -265,49 +316,59 @@ namespace osu.Framework.Graphics.Veldrid.Pipelines
             if (currentIndexBuffer == null)
                 throw new InvalidOperationException("No index buffer bound.");
 
-            pipelineDesc.PrimitiveTopology = topology;
-            Array.Resize(ref pipelineDesc.ResourceLayouts, currentShader.LayoutCount);
-
-            // Activate texture layouts.
-            foreach (var (unit, _) in attachedTextures)
+            if (pipelineDesc.PrimitiveTopology != topology)
             {
-                var layout = currentShader.GetTextureLayout(unit);
-                if (layout == null)
-                    continue;
-
-                pipelineDesc.ResourceLayouts[layout.Set] = layout.Layout;
+                pipelineDesc.PrimitiveTopology = topology;
+                currentPipeline = null;
             }
 
-            // Activate uniform buffer layouts.
-            foreach (var (name, _) in attachedUniformBuffers)
+            // Resource layouts depend on the shader and occupied slots, not the resources' contents.
+            if (resourceLayoutsChanged)
             {
-                var layout = currentShader.GetUniformBufferLayout(name);
-                if (layout == null)
-                    continue;
+                Array.Resize(ref pipelineDesc.ResourceLayouts, currentShader.LayoutCount);
+                activeTextureLayouts.Clear();
+                activeUniformLayouts.Clear();
 
-                pipelineDesc.ResourceLayouts[layout.Set] = layout.Layout;
+                // Activate texture layouts.
+                foreach (var (unit, _) in attachedTextures)
+                {
+                    var layout = currentShader.GetTextureLayout(unit);
+                    if (layout == null)
+                        continue;
+
+                    pipelineDesc.ResourceLayouts[layout.Set] = layout.Layout;
+                    activeTextureLayouts.Add((unit, layout));
+                }
+
+                // Activate uniform buffer layouts.
+                foreach (var (name, _) in attachedUniformBuffers)
+                {
+                    var layout = currentShader.GetUniformBufferLayout(name);
+                    if (layout == null)
+                        continue;
+
+                    pipelineDesc.ResourceLayouts[layout.Set] = layout.Layout;
+                    activeUniformLayouts.Add((name, layout));
+                }
+
+                currentPipeline = null;
+                resourceLayoutsChanged = false;
             }
 
-            // Activate the pipeline.
-            Commands.SetPipeline(createPipeline());
+            // Keep resource binding below active: uniform buffers may upload data or change their range on every draw.
+            Commands.SetPipeline(currentPipeline ??= createPipeline());
 
-            // Activate texture resources.
-            foreach (var (unit, texture) in attachedTextures)
+            // Resolve resources from the current attachments, since replacing a resource does not change its layout.
+            foreach (var (unit, layout) in activeTextureLayouts)
             {
-                var layout = currentShader.GetTextureLayout(unit);
-                if (layout == null)
-                    continue;
-
+                var texture = attachedTextures[unit];
                 Commands.SetGraphicsResourceSet((uint)layout.Set, texture.GetResourceSet(Factory, layout.Layout));
             }
 
-            // Activate uniform buffer resources.
-            foreach (var (name, buffer) in attachedUniformBuffers)
+            // Only visit blocks used by this shader, rather than every block attached earlier in the frame.
+            foreach (var (name, layout) in activeUniformLayouts)
             {
-                var layout = currentShader.GetUniformBufferLayout(name);
-                if (layout == null)
-                    continue;
-
+                var buffer = attachedUniformBuffers[name];
                 uint bufferOffset = uniformBufferOffsets.GetValueOrDefault(buffer);
                 Commands.SetGraphicsResourceSet((uint)layout.Set, buffer.GetResourceSet(layout.Layout), 1, ref bufferOffset);
             }

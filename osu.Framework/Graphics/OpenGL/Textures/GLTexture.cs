@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
@@ -7,17 +7,17 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Threading;
 using osu.Framework.Development;
 using osu.Framework.Extensions.ImageExtensions;
 using osu.Framework.Graphics.Primitives;
 using osu.Framework.Graphics.Rendering;
 using osu.Framework.Graphics.Textures;
+using osu.Framework.Imaging;
 using osu.Framework.Logging;
 using osu.Framework.Platform;
 using osuTK.Graphics;
 using osuTK.Graphics.ES30;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
 
 namespace osu.Framework.Graphics.OpenGL.Textures
 {
@@ -26,7 +26,15 @@ namespace osu.Framework.Graphics.OpenGL.Textures
         protected readonly GLRenderer Renderer;
         private readonly TextureFilteringMode filteringMode;
         private readonly TexturePixelFormat pixelFormat;
+
+        /// <summary>
+        /// Creates an empty (allocation-only) upload matching this texture's format, e.g. for single-channel framebuffers.
+        /// </summary>
+        internal ITextureUpload CreateEmptyUpload() => new TextureUpload(pixelFormat);
         private readonly Queue<ITextureUpload> uploadQueue = new Queue<ITextureUpload>();
+
+        // Published under the queue lock so empty checks never read Queue.Count without synchronisation.
+        private int pendingUploadCount;
 
         IRenderer INativeTexture.Renderer => Renderer;
 
@@ -48,7 +56,7 @@ namespace osu.Framework.Graphics.OpenGL.Textures
 
         public virtual int Width { get; set; }
         public virtual int Height { get; set; }
-        public virtual int GetByteSize() => Width * Height * 4;
+        public virtual int GetByteSize() => Width * Height * (pixelFormat == TexturePixelFormat.R8Float ? 1 : 4);
         public bool Available { get; private set; } = true;
 
         private int? mipLevel;
@@ -78,6 +86,40 @@ namespace osu.Framework.Graphics.OpenGL.Textures
         private bool manualMipmaps;
 
         private readonly List<RectangleI> uploadedRegions = new List<RectangleI>();
+        private readonly List<RectangleI> mipmapRegions = new List<RectangleI>();
+
+        /// <summary>
+        /// Whether levels 1 and above have not yet been fully generated from the current level 0. Regional regeneration
+        /// relies on a whole-texture generation having allocated and initialised every level first.
+        /// </summary>
+        private bool requiresFullMipmaps = true;
+
+        /// <summary>
+        /// The number of regional mipmap generations performed, for diagnostics and tests.
+        /// </summary>
+        internal int RegionMipmapGenerations { get; private set; }
+
+        private bool tryGenerateRegionMipmaps()
+        {
+            if (requiresFullMipmaps || !Renderer.SupportsRegionMipmaps || !MipmapRegions.SupportsFormat(pixelFormat))
+                return false;
+
+            if (!MipmapRegions.TryPlan(uploadedRegions, Width, Height, mipmapRegions))
+                return false;
+
+            foreach (var region in mipmapRegions)
+            {
+                if (!Renderer.TryGenerateMipmaps(textureId, region, InternalFormat, PixelFormat, PixelType))
+                {
+                    requiresFullMipmaps = true;
+                    return false;
+                }
+
+                RegionMipmapGenerations++;
+            }
+
+            return true;
+        }
 
         private readonly Color4? initialisationColour;
 
@@ -253,6 +295,7 @@ namespace osu.Framework.Graphics.OpenGL.Textures
 
                 bool requireUpload = uploadQueue.Count == 0;
                 uploadQueue.Enqueue(upload);
+                Volatile.Write(ref pendingUploadCount, uploadQueue.Count);
 
                 if (requireUpload && !BypassTextureUploadQueueing)
                     Renderer.EnqueueTextureUpload(this);
@@ -273,155 +316,63 @@ namespace osu.Framework.Graphics.OpenGL.Textures
             {
                 using (upload)
                 {
-                    fixed (Rgba32* ptr = upload.Data)
-                        DoUpload(upload, (IntPtr)ptr);
+                    ITextureUpload effectiveUpload = upload;
+                    IDisposable convertedDisposable = null;
 
-                    uploadedRegions.Add(upload.Bounds);
+                    if (upload is AlphaTextureUpload alpha && pixelFormat == TexturePixelFormat.R8G8B8A8Float)
+                    {
+                        var converted = alpha.ToRgbaUpload();
+                        effectiveUpload = converted;
+                        convertedDisposable = converted;
+                    }
+
+                    try
+                    {
+                        if (effectiveUpload.Format != pixelFormat)
+                            throw new InvalidOperationException($"Texture upload format {effectiveUpload.Format} does not match texture format {pixelFormat}.");
+
+                        int previousAlignment = 4;
+                        if (pixelFormat == TexturePixelFormat.R8Float)
+                        {
+                            GL.GetInteger(GetPName.UnpackAlignment, out previousAlignment);
+                            GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+                        }
+
+                        try
+                        {
+                            (int id, int width, int height) previous = (textureId, internalWidth, internalHeight);
+
+                            fixed (byte* ptr = effectiveUpload.RawData)
+                                DoUpload(effectiveUpload, (IntPtr)ptr);
+
+                            // Only level-0 data uploaded into an existing allocation can be followed by regional regeneration.
+                            if (previous != (textureId, internalWidth, internalHeight) || effectiveUpload.Level != 0 || effectiveUpload.RawData.IsEmpty)
+                                requiresFullMipmaps = true;
+                        }
+                        finally
+                        {
+                            if (pixelFormat == TexturePixelFormat.R8Float)
+                                GL.PixelStore(PixelStoreParameter.UnpackAlignment, previousAlignment);
+                        }
+
+                        uploadedRegions.Add(effectiveUpload.Bounds);
+                    }
+                    finally
+                    {
+                        convertedDisposable?.Dispose();
+                    }
                 }
             }
 
-            #region Custom mipmap generation (disabled)
-
-            // Generate mipmaps for just the updated regions of the texture.
-            // This implementation is functionally equivalent to GL.GenerateMipmap(),
-            // only that it is much more efficient if only small parts of the texture
-            // have been updated.
-
-            // The implementation has been tried in a release, but the user reception has been mixed
-            // due to various issues on various platforms (most prominently android).
-            // As it's difficult to ascertain a reasonable heuristic as to when it should be safe to use this implementation,
-            // for now it is unconditionally disabled, and it can be revisited at a later date.
-
-            // if (uploadedRegions.Count != 0 && !manualMipmaps)
-            // {
-            //     // Merge overlapping upload regions to prevent redundant mipmap generation.
-            //     // i goes through the list left-to-right, j goes through it right-to-left
-            //     // until both indices meet somewhere in the middle.
-            //     // This algorithm needs multiple passes until no possible merges are found.
-            //     bool mergeFound;
-
-            //     do
-            //     {
-            //         mergeFound = false;
-
-            //         for (int i = 0; i < uploadedRegions.Count; ++i)
-            //         {
-            //             RectangleI toMerge = uploadedRegions[i];
-
-            //             for (int j = uploadedRegions.Count - 1; j > i; --j)
-            //             {
-            //                 RectangleI mergeCandidate = uploadedRegions[j];
-
-            //                 if (!toMerge.Intersect(mergeCandidate).IsEmpty)
-            //                 {
-            //                     uploadedRegions[i] = toMerge = RectangleI.Union(toMerge, mergeCandidate);
-            //                     uploadedRegions.RemoveAt(j);
-            //                     mergeFound = true;
-            //                 }
-            //             }
-            //         }
-            //     } while (mergeFound);
-
-            //     // Mipmap generation using the merged upload regions follows
-            //     using var frameBuffer = new GLFrameBuffer(Renderer, this);
-
-            //     BlendingParameters previousBlendingParameters = Renderer.CurrentBlendingParameters;
-
-            //     // Use a simple render state (no blending, masking, scissoring, stenciling, etc.)
-            //     Renderer.SetBlend(BlendingParameters.None);
-            //     Renderer.PushDepthInfo(new DepthInfo(false, false));
-            //     Renderer.PushStencilInfo(new StencilInfo(false));
-            //     Renderer.PushScissorState(false);
-
-            //     Renderer.BindFrameBuffer(frameBuffer);
-
-            //     // Create render state for mipmap generation
-            //     Renderer.BindTexture(this);
-            //     Renderer.GetMipmapShader().Bind();
-
-            //     while (uploadedRegions.Count > 0)
-            //     {
-            //         int width = internalWidth;
-            //         int height = internalHeight;
-
-            //         int count = Math.Min(uploadedRegions.Count, IRenderer.MAX_QUADS);
-
-            //         // Generate quad buffer that will hold all the updated regions
-            //         var quadBuffer = new GLQuadBuffer<UncolouredVertex2D>(Renderer, count, BufferUsageHint.StreamDraw);
-
-            //         // Compute mipmap by iteratively blitting coarser and coarser versions of the updated regions
-            //         for (int level = 1; level < IRenderer.MAX_MIPMAP_LEVELS + 1 && (width > 1 || height > 1); ++level)
-            //         {
-            //             width /= 2;
-            //             height /= 2;
-
-            //             // Fill quad buffer with downscaled (and conservatively rounded) draw rectangles
-            //             for (int i = 0; i < count; ++i)
-            //             {
-            //                 // Conservatively round the draw rectangles. Rounding to integer coords is required
-            //                 // in order to ensure all the texels affected by linear interpolation are touched.
-            //                 // We could skip the rounding & use a single vertex buffer for all levels if we had
-            //                 // conservative raster, but alas, that's only supported on NV and Intel.
-            //                 Vector2I topLeft = uploadedRegions[i].TopLeft;
-            //                 topLeft = new Vector2I(topLeft.X / 2, topLeft.Y / 2);
-            //                 Vector2I bottomRight = uploadedRegions[i].BottomRight;
-            //                 bottomRight = new Vector2I(MathUtils.DivideRoundUp(bottomRight.X, 2), MathUtils.DivideRoundUp(bottomRight.Y, 2));
-            //                 uploadedRegions[i] = new RectangleI(topLeft.X, topLeft.Y, bottomRight.X - topLeft.X, bottomRight.Y - topLeft.Y);
-
-            //                 // Normalize the draw rectangle into the unit square, which doubles as texture sampler coordinates.
-            //                 RectangleF r = (RectangleF)uploadedRegions[i] / new Vector2(width, height);
-
-            //                 quadBuffer.SetVertex(i * 4 + 0, new UncolouredVertex2D { Position = r.BottomLeft });
-            //                 quadBuffer.SetVertex(i * 4 + 1, new UncolouredVertex2D { Position = r.BottomRight });
-            //                 quadBuffer.SetVertex(i * 4 + 2, new UncolouredVertex2D { Position = r.TopRight });
-            //                 quadBuffer.SetVertex(i * 4 + 3, new UncolouredVertex2D { Position = r.TopLeft });
-            //             }
-
-            //             // Read the texture from 1 mip level higher...
-            //             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinLod, level - 1);
-            //             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMaxLod, level - 1);
-
-            //             // ...than the one we're writing to via frame buffer.
-            //             GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget2d.Texture2D, TextureId, level);
-
-            //             // Perform the actual mip level draw
-            //             Renderer.PushViewport(new RectangleI(0, 0, width, height));
-
-            //             quadBuffer.Update();
-            //             quadBuffer.Draw();
-
-            //             Renderer.PopViewport();
-            //         }
-
-            //         uploadedRegions.RemoveRange(0, count);
-            //     }
-
-            //     // Restore previous render state
-            //     Renderer.GetMipmapShader().Unbind();
-
-            //     Renderer.PopScissorState();
-            //     Renderer.PopStencilInfo();
-            //     Renderer.PopDepthInfo();
-
-            //     Renderer.SetBlend(previousBlendingParameters);
-
-            //     Renderer.UnbindFrameBuffer(frameBuffer);
-
-            //     GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinLod, 0);
-            //     GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMaxLod, IRenderer.MAX_MIPMAP_LEVELS);
-            // }
-
-            #endregion
-
-            #region GL-provided mipmap generation
-
             if (uploadedRegions.Count != 0 && !manualMipmaps)
             {
-                GL.Hint(HintTarget.GenerateMipmapHint, HintMode.Nicest);
-                GL.GenerateMipmap(TextureTarget.Texture2D);
+                if (!tryGenerateRegionMipmaps())
+                {
+                    GL.Hint(HintTarget.GenerateMipmapHint, HintMode.Nicest);
+                    GL.GenerateMipmap(TextureTarget.Texture2D);
+                    requiresFullMipmaps = false;
+                }
             }
-
-            #endregion
 
             return uploadedRegions.Count != 0;
         }
@@ -442,6 +393,13 @@ namespace osu.Framework.Graphics.OpenGL.Textures
 
         private bool tryGetNextUpload(out ITextureUpload upload)
         {
+            // Recheck on every call: atlas uploads may arrive between two glyph draws in the same frame.
+            if (Volatile.Read(ref pendingUploadCount) == 0)
+            {
+                upload = null;
+                return false;
+            }
+
             lock (uploadQueue)
             {
                 if (uploadQueue.Count == 0)
@@ -451,6 +409,7 @@ namespace osu.Framework.Graphics.OpenGL.Textures
                 }
 
                 upload = uploadQueue.Dequeue();
+                Volatile.Write(ref pendingUploadCount, uploadQueue.Count);
                 return true;
             }
         }
@@ -492,7 +451,7 @@ namespace osu.Framework.Graphics.OpenGL.Textures
 
                 if ((Width == upload.Bounds.Width && Height == upload.Bounds.Height) || dataPointer == IntPtr.Zero)
                 {
-                    updateMemoryUsage(upload.Level, (long)Width * Height * 4);
+                    updateMemoryUsage(upload.Level, (long)Width * Height * (pixelFormat == TexturePixelFormat.R8Float ? 1 : 4));
                     GL.TexImage2D(TextureTarget2d.Texture2D, upload.Level, InternalFormat, Width, Height, 0, PixelFormat, PixelType, dataPointer);
                 }
                 else
@@ -531,10 +490,20 @@ namespace osu.Framework.Graphics.OpenGL.Textures
             }
         }
 
-        private void initializeLevel(int level, int width, int height)
+        private unsafe void initializeLevel(int level, int width, int height)
         {
             if (initialisationColour == null)
                 return;
+
+            if (pixelFormat == TexturePixelFormat.R8Float)
+            {
+                byte[] coverage = new byte[checked(width * height)];
+                Array.Fill(coverage, (byte)Math.Clamp((int)MathF.Round(initialisationColour.Value.R * 255), 0, 255));
+                updateMemoryUsage(level, coverage.Length);
+                fixed (byte* ptr = coverage)
+                    GL.TexImage2D(TextureTarget2d.Texture2D, level, InternalFormat, width, height, 0, PixelFormat, PixelType, (IntPtr)ptr);
+                return;
+            }
 
             var rgbaColour = new Rgba32(new Vector4(initialisationColour.Value.R, initialisationColour.Value.G, initialisationColour.Value.B, initialisationColour.Value.A));
 

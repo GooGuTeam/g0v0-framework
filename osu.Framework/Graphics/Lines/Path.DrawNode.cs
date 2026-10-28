@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using osu.Framework.Graphics.Primitives;
 using osuTK;
@@ -20,16 +20,30 @@ namespace osu.Framework.Graphics.Lines
         private class PathDrawNode : DrawNode
         {
             private const float precision = 0.01f; // Smallest allowed segment length. Used for segment reduction algorithm.
+            private const int min_batch_quads = 64;
+            private const int max_batch_quads = 9000;
+            private const int vertices_per_chunk = 64 * IRenderer.VERTICES_PER_QUAD;
 
             protected new Path Source => (Path)base.Source;
 
             private readonly List<Line> segments = new List<Line>();
+            private long segmentsVersion = -1;
+            private readonly List<PathVertex> vertices = new List<PathVertex>();
+            private readonly List<RectangleF> vertexChunkBounds = new List<RectangleF>();
+            private bool verticesValid;
+            private StaticQuadMesh<PathVertex>? staticMesh;
+            private PathDrawRange? drawRange;
+            private Vector2 firstRangeVertex;
+            private Vector2 lastRangeVertex;
+            private readonly List<PathVertex> endpointVertices = new List<PathVertex>(8);
+            private IVertexBatch<PathVertex>? endpointBatch;
 
             private float radius;
             private IShader? pathShader;
             private IUniformBuffer<PathParameters>? parametersBuffer;
 
             private IVertexBatch<PathVertex>? quadBatch;
+            private int batchQuadCapacity;
 
             public PathDrawNode(Path source)
                 : base(source)
@@ -40,24 +54,84 @@ namespace osu.Framework.Graphics.Lines
             {
                 base.ApplyState();
 
-                segments.Clear();
-                segments.AddRange(Source.segments);
+                // Transforms and texture changes may redraw the path without changing its local-space segments.
+                // Resolve the lazy segment cache before comparing its version.
+                var sourceSegments = Source.segments;
+                if (segmentsVersion != Source.segmentsVersion)
+                {
+                    segments.Clear();
+                    segments.AddRange(sourceSegments);
+                    segmentsVersion = Source.segmentsVersion;
+                    verticesValid = false;
+                }
+
+                if (radius != Source.PathRadius)
+                    verticesValid = false;
 
                 radius = Source.PathRadius;
                 pathShader = Source.pathShader;
+
+                if (drawRange.HasValue != Source.DrawRange.HasValue)
+                    verticesValid = false;
+
+                drawRange = Source.DrawRange;
+                if (drawRange is { } range)
+                {
+                    Vector2 offset = Source.vertexBounds.TopLeft;
+                    drawRange = range with { StartPoint = range.StartPoint - offset, EndPoint = range.EndPoint - offset };
+                    if (range.VertexCount > 0)
+                    {
+                        firstRangeVertex = Source.vertices[range.FirstVertex] - offset;
+                        lastRangeVertex = Source.vertices[range.FirstVertex + range.VertexCount - 1] - offset;
+                    }
+                }
             }
 
             protected override void Draw(IRenderer renderer)
             {
                 base.Draw(renderer);
 
-                if (segments.Count == 0 || pathShader == null || radius == 0f)
+                if ((segments.Count == 0 && drawRange == null) || pathShader == null || radius == 0f)
                     return;
 
-                // Size must be divisible by 4 such that the amount of vertices is a multiple of the amount of vertices
-                // per primitive (quads in this case). Otherwise overflowing the batch will result in wrong
-                // grouping of vertices into primitives.
-                quadBatch ??= renderer.CreateQuadBatch<PathVertex>(9000, 10);
+                if (!verticesValid)
+                {
+                    staticMesh?.Dispose();
+                    staticMesh = null;
+                    vertices.Clear();
+                    if (drawRange.HasValue)
+                    {
+                        // Preserve original segment indices for range draws. Interior joins retain the reduced
+                        // caps to avoid overdraw; the dynamic boundary segments supply complete endpoint discs.
+                        for (int i = 0; i < segments.Count; i++)
+                        {
+                            var segment = segments[i];
+                            Vector2 previous = i > 0 ? segments[i - 1].Direction : segment.Direction;
+                            bool shortSegment = segment.Direction.LengthSquared < precision;
+                            addSegmentVertices(segment, previous, i == 0 || shortSegment ? SegmentStartLocation.Outside : SegmentStartLocation.End,
+                                i == segments.Count - 1 || shortSegment);
+                        }
+                    }
+                    else
+                        generateVertices();
+                    updateVertexChunkBounds();
+                    verticesValid = true;
+                }
+
+                // Grow in buckets rather than reallocating for each new segment while snaking.
+                // Keep the previous upper bound and overflow behaviour for very large paths.
+                int requiredQuads = Math.Min(vertices.Count / IRenderer.VERTICES_PER_QUAD, max_batch_quads);
+                if (!drawRange.HasValue && (quadBatch == null || batchQuadCapacity < requiredQuads))
+                {
+                    int capacity = min_batch_quads;
+                    while (capacity < requiredQuads)
+                        capacity = Math.Min(capacity * 2, max_batch_quads);
+
+                    quadBatch?.Dispose();
+                    quadBatch = renderer.CreateQuadBatch<PathVertex>(capacity, 10);
+                    // Deferred batches have effectively unbounded capacity and do not need replacement as the path grows.
+                    batchQuadCapacity = Math.Max(capacity, quadBatch.Size / IRenderer.VERTICES_PER_QUAD);
+                }
 
                 renderer.PushLocalMatrix(DrawInfo.Matrix);
 
@@ -80,22 +154,94 @@ namespace osu.Framework.Graphics.Lines
                 };
                 pathShader.BindUniformBlock("m_PathParameters", parametersBuffer);
 
-                updateVertexBuffer();
+                if (drawRange is { } range)
+                    drawStaticRange(renderer, range);
+                else
+                    drawDynamicMesh(renderer);
 
                 pathShader.Unbind();
 
                 renderer.PopLocalMatrix();
             }
 
+            private void drawDynamicMesh(IRenderer renderer)
+            {
+                Debug.Assert(quadBatch != null);
+                RectangleI frameBounds = renderer.CurrentMaskingInfo.ScreenSpaceAABB;
+                for (int chunk = 0; chunk < vertexChunkBounds.Count; chunk++)
+                {
+                    // Test complete quads rather than endpoints: a segment can cross the viewport with both ends outside.
+                    // Keep a small screen-space margin for rasterisation and floating-point rounding at the framebuffer edge.
+                    RectangleF screenBounds = (Quad.FromRectangle(vertexChunkBounds[chunk]) * DrawInfo.Matrix).AABBFloat.Inflate(2);
+                    if (!screenBounds.IntersectsWith(frameBounds))
+                        continue;
+
+                    int start = chunk * vertices_per_chunk;
+                    int end = Math.Min(start + vertices_per_chunk, vertices.Count);
+                    for (int i = start; i < end; i++)
+                        quadBatch.Add(vertices[i]);
+                }
+            }
+
+            private void drawStaticRange(IRenderer renderer, PathDrawRange range)
+            {
+                if (vertices.Count > 0)
+                    staticMesh ??= StaticQuadMesh<PathVertex>.Create(renderer, CollectionsMarshal.AsSpan(vertices));
+
+                int first = range.FirstVertex * IRenderer.VERTICES_PER_QUAD;
+                int end = first + Math.Max(0, range.VertexCount - 1) * IRenderer.VERTICES_PER_QUAD;
+                int runStart = -1;
+                int runEnd = first;
+                RectangleI frameBounds = renderer.CurrentMaskingInfo.ScreenSpaceAABB;
+
+                for (int start = first; start < end;)
+                {
+                    int chunk = start / vertices_per_chunk;
+                    int chunkEnd = Math.Min(end, (chunk + 1) * vertices_per_chunk);
+                    RectangleF screenBounds = (Quad.FromRectangle(vertexChunkBounds[chunk]) * DrawInfo.Matrix).AABBFloat.Inflate(2);
+                    if (screenBounds.IntersectsWith(frameBounds))
+                    {
+                        if (runStart < 0)
+                            runStart = start;
+                        runEnd = chunkEnd;
+                    }
+                    else if (runStart >= 0)
+                    {
+                        staticMesh!.Draw(runStart, runEnd - runStart);
+                        runStart = -1;
+                    }
+                    start = chunkEnd;
+                }
+
+                if (runStart >= 0)
+                    staticMesh!.Draw(runStart, runEnd - runStart);
+
+                // Only the two partial boundary segments change as the slider snakes.
+                endpointVertices.Clear();
+                if (range.VertexCount > 0)
+                {
+                    addSegmentVertices(new Line(range.StartPoint, firstRangeVertex), Vector2.Zero, SegmentStartLocation.Outside, true, endpointVertices);
+                    addSegmentVertices(new Line(lastRangeVertex, range.EndPoint), Vector2.Zero, SegmentStartLocation.Outside, true, endpointVertices);
+                }
+                else
+                    addSegmentVertices(new Line(range.StartPoint, range.EndPoint), Vector2.Zero, SegmentStartLocation.Outside, true, endpointVertices);
+
+                endpointBatch ??= renderer.CreateQuadBatch<PathVertex>(2, 10);
+                foreach (var vertex in endpointVertices)
+                    endpointBatch.Add(vertex);
+            }
+
             /// <summary>
-            /// Modifies provided segment to create visually continuous path and draws it to the screen.
+            /// Appends the quad for a segment, including the caps needed for a visually continuous path.
             /// </summary>
             /// <param name="segmentToDraw">The segment to be drawn.</param>
             /// <param name="prevSegmentDirection">Direction of a previous segment. Used to compute angle between segments.</param>
             /// <param name="location">Position of the segment's start point relative to the previous segment.</param>
             /// <param name="endCap">Whether end cap of this segment must be drawn.</param>
-            private void drawSegment(Line segmentToDraw, Vector2 prevSegmentDirection, SegmentStartLocation location, bool endCap)
+            /// <param name="target">The destination vertex list, or null for the main mesh.</param>
+            private void addSegmentVertices(Line segmentToDraw, Vector2 prevSegmentDirection, SegmentStartLocation location, bool endCap, List<PathVertex>? target = null)
             {
+                target ??= vertices;
                 Vector2 dir = segmentToDraw.Direction;
                 float lengthSquared = dir.X * dir.X + dir.Y * dir.Y;
                 Vector2 dirNorm = lengthSquared < precision * precision ? Vector2.UnitX : (dir / MathF.Sqrt(lengthSquared));
@@ -127,15 +273,14 @@ namespace osu.Framework.Graphics.Lines
                     }
                 }
 
-                Debug.Assert(quadBatch != null);
                 // Clockwise order: topLeft, topRight, bottomRight, bottomLeft.
-                quadBatch.Add(new PathVertex(segmentToDraw.StartPoint + thicknessOffset - startOffset, segmentToDraw.StartPoint, segmentToDraw.EndPoint));
-                quadBatch.Add(new PathVertex(segmentToDraw.EndPoint + thicknessOffset + endOffset, segmentToDraw.StartPoint, segmentToDraw.EndPoint));
-                quadBatch.Add(new PathVertex(segmentToDraw.EndPoint - thicknessOffset + endOffset, segmentToDraw.StartPoint, segmentToDraw.EndPoint));
-                quadBatch.Add(new PathVertex(segmentToDraw.StartPoint - thicknessOffset - startOffset, segmentToDraw.StartPoint, segmentToDraw.EndPoint));
+                target.Add(new PathVertex(segmentToDraw.StartPoint + thicknessOffset - startOffset, segmentToDraw.StartPoint, segmentToDraw.EndPoint));
+                target.Add(new PathVertex(segmentToDraw.EndPoint + thicknessOffset + endOffset, segmentToDraw.StartPoint, segmentToDraw.EndPoint));
+                target.Add(new PathVertex(segmentToDraw.EndPoint - thicknessOffset + endOffset, segmentToDraw.StartPoint, segmentToDraw.EndPoint));
+                target.Add(new PathVertex(segmentToDraw.StartPoint - thicknessOffset - startOffset, segmentToDraw.StartPoint, segmentToDraw.EndPoint));
             }
 
-            private void updateVertexBuffer()
+            private void generateVertices()
             {
                 Debug.Assert(segments.Count > 0);
 
@@ -145,8 +290,7 @@ namespace osu.Framework.Graphics.Lines
                 SegmentStartLocation location = SegmentStartLocation.Outside;
                 SegmentStartLocation nextLocation = SegmentStartLocation.End;
 
-                // We initialize "fake" initial segment before the 0'th one
-                // so that on first drawSegment() call with current SegmentStartLocation parameters path start cap will be added.
+                // Use a matching initial direction so that the first segment receives a start cap.
                 Vector2 lastSegmentDirection = segmentToDraw.Direction;
 
                 // This loop tries to merge consecutive path segments which are located within the same line.
@@ -188,7 +332,7 @@ namespace osu.Framework.Graphics.Lines
                     else // Otherwise draw the expanded segment
                     {
                         // if next segment starts inside the current one, nothing will be connected to the end of the current segment - end cap is required.
-                        drawSegment(segmentToDraw, lastSegmentDirection, location, nextLocation == SegmentStartLocation.Inside);
+                        addSegmentVertices(segmentToDraw, lastSegmentDirection, location, nextLocation == SegmentStartLocation.Inside);
 
                         lastSegmentDirection = dir;
                         segmentToDraw = segments[i];
@@ -198,7 +342,30 @@ namespace osu.Framework.Graphics.Lines
                 }
 
                 // Finish drawing last segment
-                drawSegment(segmentToDraw, lastSegmentDirection, location, true);
+                addSegmentVertices(segmentToDraw, lastSegmentDirection, location, true);
+            }
+
+            private void updateVertexChunkBounds()
+            {
+                vertexChunkBounds.Clear();
+
+                for (int start = 0; start < vertices.Count; start += vertices_per_chunk)
+                {
+                    Vector2 min = vertices[start].Position;
+                    Vector2 max = min;
+                    int end = Math.Min(start + vertices_per_chunk, vertices.Count);
+
+                    for (int i = start + 1; i < end; i++)
+                    {
+                        Vector2 position = vertices[i].Position;
+                        min.X = Math.Min(min.X, position.X);
+                        min.Y = Math.Min(min.Y, position.Y);
+                        max.X = Math.Max(max.X, position.X);
+                        max.Y = Math.Max(max.Y, position.Y);
+                    }
+
+                    vertexChunkBounds.Add(new RectangleF(min, max - min));
+                }
             }
 
             protected override void Dispose(bool isDisposing)
@@ -206,6 +373,9 @@ namespace osu.Framework.Graphics.Lines
                 base.Dispose(isDisposing);
 
                 quadBatch?.Dispose();
+                endpointBatch?.Dispose();
+                staticMesh?.Dispose();
+                parametersBuffer?.Dispose();
             }
 
             private enum SegmentStartLocation

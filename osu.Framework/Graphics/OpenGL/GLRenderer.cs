@@ -1,11 +1,12 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using osu.Framework.Extensions;
 using osu.Framework.Extensions.EnumExtensions;
 using osu.Framework.Graphics.OpenGL.Batches;
 using osu.Framework.Graphics.OpenGL.Buffers;
@@ -21,12 +22,9 @@ using osu.Framework.Statistics;
 using osuTK;
 using osuTK.Graphics;
 using osuTK.Graphics.ES30;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Memory;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
+using osu.Framework.Imaging;
 using GL4 = osuTK.Graphics.OpenGL;
-using Image = SixLabors.ImageSharp.Image;
+using Image = osu.Framework.Imaging.Image;
 
 namespace osu.Framework.Graphics.OpenGL
 {
@@ -60,6 +58,133 @@ namespace osu.Framework.Graphics.OpenGL
 
         private int backbufferFramebuffer;
 
+        /// <summary>
+        /// Whether linked programs can be retrieved and restored as driver binaries.
+        /// </summary>
+        internal bool SupportsProgramBinaries { get; private set; }
+
+        private string programBinaryDriver = string.Empty;
+
+        /// <summary>
+        /// The cache key for a program's driver binary. Binaries are only valid for the driver that produced them,
+        /// so the key includes the vendor, renderer and version strings. Version 1 binaries could contain a stage compiled
+        /// for another program (see <see cref="GLShader"/>), so they are not reused.
+        /// </summary>
+        internal string? GetProgramBinaryKey(string vertexText, string fragmentText)
+            => SupportsProgramBinaries ? $"{vertexText.ComputeMD5Hash()}#{fragmentText.ComputeMD5Hash()}#{programBinaryDriver}#glprogram#2" : null;
+
+        /// <summary>
+        /// Whether <see cref="TryGenerateMipmaps"/> may be used.
+        /// </summary>
+        internal bool SupportsRegionMipmaps { get; private set; }
+
+        /// <summary>
+        /// The largest region side processed regionally. Larger regions use whole-texture generation.
+        /// </summary>
+        private const int mipmap_scratch_size = 512;
+
+        private int mipmapSourceFramebuffer;
+        private readonly Dictionary<TextureComponentCount, MipmapScratch> mipmapScratches = new Dictionary<TextureComponentCount, MipmapScratch>();
+
+        /// <summary>
+        /// Regenerates mipmap levels 1 to <see cref="IRenderer.MAX_MIPMAP_LEVELS"/> for an aligned region of a texture,
+        /// which must be bound on the active texture unit.
+        /// <para>
+        /// The region is read through a framebuffer into a pooled scratch texture, which GL generates mipmaps for, and the
+        /// resulting levels are read back into the texture. Framebuffers are only read from (glCopyTexSubImage2D); nothing
+        /// is rendered into mipmap levels. The scratch texture's level framebuffers are attached once, so a call only
+        /// re-attaches the source texture.
+        /// </para>
+        /// </summary>
+        /// <returns>False if the region could not be processed, in which case the whole texture must be regenerated.</returns>
+        internal bool TryGenerateMipmaps(int textureId, RectangleI region, TextureComponentCount internalFormat, PixelFormat format, PixelType type)
+        {
+            MipmapRegions.ThrowIfMisaligned(region);
+
+            if (region.Width > mipmap_scratch_size || region.Height > mipmap_scratch_size)
+                return false;
+
+            // Errors raised by earlier, unrelated calls must not be attributed to this sequence.
+            for (int i = 0; i < 16 && GL.GetError() != ErrorCode.NoError; i++)
+            {
+            }
+
+            if (mipmapSourceFramebuffer == 0)
+                mipmapSourceFramebuffer = GL.GenFramebuffer();
+
+            if (!mipmapScratches.TryGetValue(internalFormat, out var scratch))
+                mipmapScratches[internalFormat] = scratch = new MipmapScratch(internalFormat, format, type);
+
+            try
+            {
+                // Level 0 of the region into the scratch texture's top-left corner. Its mipmaps there depend only on that
+                // corner, because the region is aligned.
+                GL.BindFramebuffer(FramebufferTarget.Framebuffer, mipmapSourceFramebuffer);
+                GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget2d.Texture2D, textureId, 0);
+
+                GL.BindTexture(TextureTarget.Texture2D, scratch.Texture);
+                GL.CopyTexSubImage2D(TextureTarget2d.Texture2D, 0, 0, 0, region.X, region.Y, region.Width, region.Height);
+
+                // GL_GENERATE_MIPMAP_HINT does not exist in core profiles and would raise INVALID_ENUM; it is only a hint.
+                GL.GenerateMipmap(TextureTarget.Texture2D);
+
+                GL.BindTexture(TextureTarget.Texture2D, textureId);
+
+                for (int level = 1; level <= IRenderer.MAX_MIPMAP_LEVELS; level++)
+                {
+                    GL.BindFramebuffer(FramebufferTarget.Framebuffer, scratch.LevelFramebuffers[level - 1]);
+                    GL.CopyTexSubImage2D(TextureTarget2d.Texture2D, level, region.X >> level, region.Y >> level, 0, 0, region.Width >> level, region.Height >> level);
+                }
+
+                // An incomplete framebuffer or unsupported copy raises an error here, and the caller regenerates the whole texture.
+                var error = GL.GetError();
+
+                if (error == ErrorCode.NoError)
+                    return true;
+
+                Logger.Log($"Regional mipmap generation failed (GL error {error}); using whole-texture generation.", LoggingTarget.Performance);
+                return false;
+            }
+            finally
+            {
+                GL.BindFramebuffer(FramebufferTarget.Framebuffer, mipmapSourceFramebuffer);
+                GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget2d.Texture2D, 0, 0);
+                GL.BindFramebuffer(FramebufferTarget.Framebuffer, ((GLFrameBuffer?)FrameBuffer)?.FrameBuffer ?? backbufferFramebuffer);
+
+                // Restore the target texture on the active unit, where the renderer expects it.
+                GL.BindTexture(TextureTarget.Texture2D, textureId);
+            }
+        }
+
+        /// <summary>
+        /// A scratch texture with levels 0 to <see cref="IRenderer.MAX_MIPMAP_LEVELS"/>, and one framebuffer reading each of levels 1 and above.
+        /// </summary>
+        private sealed class MipmapScratch
+        {
+            public readonly int Texture;
+            public readonly int[] LevelFramebuffers = new int[IRenderer.MAX_MIPMAP_LEVELS];
+
+            public MipmapScratch(TextureComponentCount internalFormat, PixelFormat format, PixelType type)
+            {
+                Texture = GL.GenTexture();
+                GL.BindTexture(TextureTarget.Texture2D, Texture);
+                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureBaseLevel, 0);
+                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMaxLevel, IRenderer.MAX_MIPMAP_LEVELS);
+                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)All.Nearest);
+                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)All.Nearest);
+
+                for (int level = 0; level <= IRenderer.MAX_MIPMAP_LEVELS; level++)
+                    GL.TexImage2D(TextureTarget2d.Texture2D, level, internalFormat, mipmap_scratch_size >> level, mipmap_scratch_size >> level, 0, format, type, IntPtr.Zero);
+
+                for (int level = 1; level <= IRenderer.MAX_MIPMAP_LEVELS; level++)
+                {
+                    LevelFramebuffers[level - 1] = GL.GenFramebuffer();
+                    GL.BindFramebuffer(FramebufferTarget.Framebuffer, LevelFramebuffers[level - 1]);
+                    GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget2d.Texture2D, Texture, level);
+                }
+            }
+        }
+
         private readonly Dictionary<string, IGLUniformBuffer> boundUniformBuffers = new Dictionary<string, IGLUniformBuffer>();
         private bool? lastBlendingEnabledState;
         private int lastBoundVertexArray;
@@ -78,6 +203,16 @@ namespace osu.Framework.Graphics.OpenGL
             IsEmbedded = version.Contains("OpenGL ES"); // As defined by https://www.khronos.org/registry/OpenGL-Refpages/es2.0/xhtml/glGetString.xml
 
             MaxTextureSize = GL.GetInteger(GetPName.MaxTextureSize);
+
+            // Program binaries are core in OpenGL ES 3.0 and OpenGL 4.1 (ARB_get_program_binary before that); drivers may still offer no formats.
+            SupportsProgramBinaries = GL.GetInteger(GetPName.NumProgramBinaryFormats) > 0;
+            GL.GetError();
+            programBinaryDriver = $"{GL.GetString(StringName.Vendor)}|{GL.GetString(StringName.Renderer)}|{GL.GetString(StringName.Version)}".ComputeMD5Hash();
+
+            // Attaching non-zero mipmap levels to framebuffers requires OpenGL 3.0 / OpenGL ES 3.0.
+            // MAJOR_VERSION is not queryable before those versions; an error leaves the result at zero.
+            SupportsRegionMipmaps = GL.GetInteger(GetPName.MajorVersion) >= 3;
+            GL.GetError();
             MaxRenderBufferSize = GL.GetInteger(GetPName.MaxRenderbufferSize);
 
             GL.Disable(EnableCap.StencilTest);
@@ -96,7 +231,64 @@ namespace osu.Framework.Graphics.OpenGL
 
             Logger.Log($"{nameof(UseStructuredBuffers)}: {UseStructuredBuffers}");
 
+            ProbeTextureSizes($"{GL.GetString(StringName.Vendor)}|{GL.GetString(StringName.Renderer)}|{version}", tryAllocateTexture);
+
+            ProbeBindless($"{GL.GetString(StringName.Vendor)}|{GL.GetString(StringName.Renderer)}|{version}|{GL.GetString(StringName.ShadingLanguageVersion)}|{extensions}",
+                () => GLBindlessTextureProbe.Run(openGLSurface, extensions));
+
             openGLSurface.ClearCurrent();
+        }
+
+        /// <summary>
+        /// Allocates a render target of the given size and clears it, so that drivers which allocate lazily commit the memory.
+        /// </summary>
+        private bool tryAllocateTexture(int size, TexturePixelFormat format)
+        {
+            bool singleChannel = format == TexturePixelFormat.R8Float;
+            int texture = 0;
+            int framebuffer = 0;
+
+            while (GL.GetError() != ErrorCode.NoError)
+            {
+            }
+
+            try
+            {
+                texture = GL.GenTexture();
+                GL.BindTexture(TextureTarget.Texture2D, texture);
+                GL.TexImage2D(TextureTarget2d.Texture2D, 0, singleChannel ? TextureComponentCount.R8 : TextureComponentCount.Rgba8, size, size, 0,
+                    singleChannel ? PixelFormat.Red : PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
+
+                if (GL.GetError() != ErrorCode.NoError)
+                    return false;
+
+                framebuffer = GL.GenFramebuffer();
+                GL.BindFramebuffer(FramebufferTarget.Framebuffer, framebuffer);
+                GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget2d.Texture2D, texture, 0);
+
+                if (GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer) != FramebufferErrorCode.FramebufferComplete)
+                    return false;
+
+                GL.Viewport(0, 0, size, size);
+                GL.ClearColor(0, 0, 0, 0);
+                GL.Clear(ClearBufferMask.ColorBufferBit);
+                GL.Finish();
+
+                return GL.GetError() == ErrorCode.NoError;
+            }
+            finally
+            {
+                GL.BindFramebuffer(FramebufferTarget.Framebuffer, backbufferFramebuffer);
+                GL.BindTexture(TextureTarget.Texture2D, 0);
+
+                if (framebuffer != 0)
+                    GL.DeleteFramebuffer(framebuffer);
+                if (texture != 0)
+                    GL.DeleteTexture(texture);
+
+                if (!(GL.GetError() == ErrorCode.NoError))
+                    Logger.Log($"Texture size probe: cleanup after {size}x{size} {format} raised a GL error.");
+            }
         }
 
         protected virtual string GetExtensions()
@@ -366,12 +558,12 @@ namespace osu.Framework.Graphics.OpenGL
         protected internal override Image<Rgba32> TakeScreenshot()
         {
             var size = ((IGraphicsSurface)openGLSurface).GetDrawableSize();
-            var data = MemoryAllocator.Default.Allocate<Rgba32>(size.Width * size.Height);
+            var data = new osu.Framework.Allocation.PooledMemoryOwner<Rgba32>(size.Width * size.Height);
 
             GL.ReadPixels(0, 0, size.Width, size.Height, PixelFormat.Rgba, PixelType.UnsignedByte, ref MemoryMarshal.GetReference(data.Memory.Span));
 
             var image = Image.LoadPixelData(data.Memory.Span, size.Width, size.Height);
-            image.Mutate(i => i.Flip(FlipMode.Vertical));
+            image.Mutate(i => i.FlipVertical());
             return image;
         }
 
@@ -380,7 +572,7 @@ namespace osu.Framework.Graphics.OpenGL
             int width = frameBuffer.Texture.Width;
             int height = frameBuffer.Texture.Height;
 
-            var data = MemoryAllocator.Default.Allocate<Rgba32>(width * height);
+            var data = new osu.Framework.Allocation.PooledMemoryOwner<Rgba32>(width * height);
 
             frameBuffer.Bind();
             GL.ReadPixels(0, 0, width, height, PixelFormat.Rgba, PixelType.UnsignedByte, ref MemoryMarshal.GetReference(data.Memory.Span));
@@ -459,8 +651,8 @@ namespace osu.Framework.Graphics.OpenGL
             => new GLShaderStorageBufferObject<TData>(this, uboSize, ssboSize);
 
         protected override INativeTexture CreateNativeTexture(int width, int height, bool manualMipmaps = false, TextureFilteringMode filteringMode = TextureFilteringMode.Linear,
-                                                              Color4? initialisationColour = null)
-            => new GLTexture(this, width, height, TexturePixelFormat.R8G8B8A8Float, manualMipmaps, filteringMode, initialisationColour);
+                                                              Color4? initialisationColour = null, TexturePixelFormat textureFormat = TexturePixelFormat.R8G8B8A8Float)
+            => new GLTexture(this, width, height, textureFormat, manualMipmaps, filteringMode, initialisationColour);
 
         protected override INativeTexture CreateNativeVideoTexture(int width, int height) => new GLVideoTexture(this, width, height);
 

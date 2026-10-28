@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -50,6 +50,16 @@ namespace osu.Framework.Graphics.Rendering.Deferred
         public ResourceReference Reference<T>(T obj)
             where T : class?
             => Allocator.Reference(obj);
+
+        /// <summary>
+        /// References an object, reusing the last resource ID when the same object was referenced adjacently.
+        /// </summary>
+        /// <param name="obj">The object.</param>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <returns>A reference to the object. May be dereferenced via <see cref="Dereference{T}"/>.</returns>
+        public ResourceReference ReferenceAdjacent<T>(T obj)
+            where T : class?
+            => Allocator.ReferenceAdjacent(obj);
 
         /// <summary>
         /// Dereferences an object.

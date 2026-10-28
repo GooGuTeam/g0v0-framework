@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
@@ -23,8 +23,7 @@ using osu.Framework.Graphics.Pooling;
 using osu.Framework.Graphics.Rendering;
 using osu.Framework.Platform;
 using osuTK;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using osu.Framework.Imaging;
 using WindowState = osu.Framework.Platform.WindowState;
 
 namespace osu.Framework.Graphics.Performance
@@ -259,10 +258,12 @@ namespace osu.Framework.Graphics.Performance
 
             addArea(null, null, HEIGHT, amount_ms_steps, columnUpload);
 
+            var columnData = columnUpload.RawData;
+
             for (int i = 0; i < HEIGHT; i++)
             {
                 for (int k = 0; k < WIDTH; k++)
-                    fullBackground[k, i] = columnUpload.RawData[i];
+                    fullBackground[k, i] = columnData[i];
             }
 
             addArea(null, null, HEIGHT, amount_count_steps, columnUpload);
@@ -493,6 +494,8 @@ namespace osu.Framework.Graphics.Performance
 
             Color4 col = frameTimeType.HasValue ? getColour(frameTimeType.Value) : new Color4(0.1f, 0.1f, 0.1f, 1);
 
+            var columnData = columnUpload.RawData;
+
             for (int i = currentHeight - 1; i >= 0; --i)
             {
                 if (drawHeight-- == 0) break;
@@ -509,7 +512,7 @@ namespace osu.Framework.Graphics.Performance
                 else if (acceptableRange)
                     brightnessAdjust *= 0.8f;
 
-                columnUpload.RawData[i] = new Rgba32(col.R * brightnessAdjust, col.G * brightnessAdjust, col.B * brightnessAdjust, col.A);
+                columnData[i] = new Rgba32(col.R * brightnessAdjust, col.G * brightnessAdjust, col.B * brightnessAdjust, col.A);
 
                 currentHeight--;
             }

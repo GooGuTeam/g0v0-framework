@@ -30,7 +30,17 @@ namespace osu.Framework.Development
         private static readonly AsyncLocal<bool> suppressed = new AsyncLocal<bool>();
 
         // Export failures must propagate without disabling the live host's error boundary.
-        internal static IDisposable Suppress() => new SuppressionScope();
+        // Setting an AsyncLocal copies the execution context's value map, so nested scopes leave it alone.
+        internal static IDisposable Suppress() => suppressed.Value ? nested_scope : new SuppressionScope();
+
+        private static readonly IDisposable nested_scope = new NestedSuppressionScope();
+
+        private sealed class NestedSuppressionScope : IDisposable
+        {
+            public void Dispose()
+            {
+            }
+        }
 
         private sealed class SuppressionScope : IDisposable
         {

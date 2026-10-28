@@ -5,8 +5,10 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using osu.Framework.Development;
 using osu.Framework.Extensions.TypeExtensions;
@@ -23,8 +25,7 @@ using osu.Framework.Threading;
 using osu.Framework.Timing;
 using osuTK;
 using osuTK.Graphics;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using osu.Framework.Imaging;
 using RectangleF = osu.Framework.Graphics.Primitives.RectangleF;
 using Texture = osu.Framework.Graphics.Textures.Texture;
 
@@ -35,6 +36,163 @@ namespace osu.Framework.Graphics.Rendering
     /// </summary>
     public abstract class Renderer : IRenderer
     {
+        internal AtlasPackingStrategy TextureAtlasPacking { get; set; } = AtlasPackingStrategy.LegacyRows;
+
+        private readonly Dictionary<(int size, TextureFilteringMode filteringMode, bool manualMipmaps), TextureAtlas> sharedTextureAtlases =
+            new Dictionary<(int, TextureFilteringMode, bool), TextureAtlas>();
+
+        /// <summary>
+        /// The atlas shared by all <see cref="TextureStore"/>s with the given settings.
+        /// </summary>
+        /// <remarks>
+        /// Separate atlases per store (the game, each skin, each ruleset) made sprites from different stores alternate between
+        /// textures, splitting batches. Atlases never free regions and are not disposed by their stores, so sharing changes neither
+        /// lifetime nor capacity: a full page is replaced by a new one and stays alive while its textures are referenced.
+        /// </remarks>
+        internal TextureAtlas GetSharedTextureAtlas(int size, TextureFilteringMode filteringMode, bool manualMipmaps)
+        {
+            lock (sharedTextureAtlases)
+            {
+                var key = (size, filteringMode, manualMipmaps);
+
+                if (!sharedTextureAtlases.TryGetValue(key, out var atlas))
+                    sharedTextureAtlases[key] = atlas = new TextureAtlas(this, size, size, manualMipmaps, filteringMode);
+
+                return atlas;
+            }
+        }
+        internal AtlasPackingStrategy FontAtlasPacking { get; set; } = AtlasPackingStrategy.FreeRectangles;
+        internal bool LowResolutionFonts { get; set; }
+        internal bool SingleChannelFontAtlas { get; set; }
+        internal bool ShowOverdrawIndicator { get; set; }
+
+        private readonly FrameDrawCapture? drawCapture = FrameDrawCapture.Create();
+        internal GraphicsProbeCache? GraphicsProbeCache { get; set; }
+
+        /// <summary>
+        /// Whether to run the bindless texture probe. Other probes only need <see cref="GraphicsProbeCache"/>.
+        /// </summary>
+        internal bool ProbeBindlessTextures { get; set; } = true;
+
+        /// <summary>
+        /// The verified texture sizes on this device, or null if the probe did not run.
+        /// </summary>
+        public TextureSizeProbeResult? TextureSizeSupport { get; private set; }
+
+        /// <summary>
+        /// Texture sizes tried by <see cref="ProbeTextureSizes"/>, in order. Sizes above the last are not probed.
+        /// </summary>
+        private static readonly int[] probed_texture_sizes = { 2048, 4096, 8192 };
+
+        private const int default_font_atlas_size = 4096;
+        private const int max_single_channel_font_atlas_size = 8192;
+
+        private int verifiedSingleChannelSize = default_font_atlas_size;
+
+        /// <summary>
+        /// The size the driver reports, before <see cref="ProbeTextureSizes"/> limits <see cref="MaxTextureSize"/> to verified RGBA sizes.
+        /// </summary>
+        private int? reportedMaxTextureSize;
+
+        /// <summary>
+        /// The size of glyph atlases. Single-channel atlases use a quarter of the memory, so they grow to the largest verified
+        /// single-channel size (up to 8192), which keeps large glyph sets such as CJK text on fewer atlas pages.
+        /// </summary>
+        internal int FontAtlasSize => SingleChannelFontAtlas
+            ? Math.Min(Math.Min(max_single_channel_font_atlas_size, verifiedSingleChannelSize), reportedMaxTextureSize ?? MaxTextureSize)
+            : Math.Min(default_font_atlas_size, MaxTextureSize);
+
+        /// <summary>
+        /// Verifies, once per device and driver, which texture sizes can actually be allocated and rendered to, and limits
+        /// <see cref="MaxTextureSize"/> to them. Some drivers report sizes that fail to allocate.
+        /// Must run with the device ready, before resources are created.
+        /// </summary>
+        /// <param name="fingerprint">Identifies the device and driver.</param>
+        /// <param name="tryAllocate">Allocates and clears a square render target of the given size and format, returning whether it succeeded.</param>
+        internal void ProbeTextureSizes(string fingerprint, Func<int, TexturePixelFormat, bool> tryAllocate)
+        {
+            if (GraphicsProbeCache == null)
+                return;
+
+            int reported = MaxTextureSize;
+            int conservative = Math.Min(reported, default_font_atlas_size);
+
+            TextureSizeSupport = GraphicsProbeCache.GetOrProbe("texture-size", $"{GetType().Name}|{fingerprint}|{reported}",
+                () => probeTextureSizes(reported, tryAllocate),
+                saved => saved.MaxRgbaSize > 0 && saved.MaxSingleChannelSize > 0 && !string.IsNullOrEmpty(saved.Details),
+                () => new TextureSizeProbeResult(conservative, conservative, false, "Previous probe did not finish; using conservative sizes. Clear graphics probe cache to retry."),
+                reason => new TextureSizeProbeResult(conservative, conservative, false, reason),
+                e => new TextureSizeProbeResult(conservative, conservative, false, $"Probe failed: {e.Message}"));
+
+            reportedMaxTextureSize = reported;
+            MaxTextureSize = TextureSizeSupport.CoversReportedSize ? reported : Math.Min(reported, TextureSizeSupport.MaxRgbaSize);
+            verifiedSingleChannelSize = TextureSizeSupport.MaxSingleChannelSize;
+
+            Logging.Logger.Log($"Texture size probe: reported {reported}, using {MaxTextureSize}; font atlas {FontAtlasSize}. {TextureSizeSupport.Details}");
+        }
+
+        private static TextureSizeProbeResult probeTextureSizes(int reported, Func<int, TexturePixelFormat, bool> tryAllocate)
+        {
+            int rgba = 0;
+            bool allPassed = true;
+
+            foreach (int size in probed_texture_sizes)
+            {
+                if (size > reported)
+                    break;
+
+                if (!tryAllocate(size, TexturePixelFormat.R8G8B8A8Float))
+                {
+                    allPassed = false;
+                    break;
+                }
+
+                rgba = size;
+            }
+
+            // Single-channel textures are a quarter of the size, so they may fit where RGBA did not.
+            int singleChannel = rgba;
+
+            foreach (int size in probed_texture_sizes)
+            {
+                if (size <= singleChannel || size > reported)
+                    continue;
+
+                if (!tryAllocate(size, TexturePixelFormat.R8Float))
+                    break;
+
+                singleChannel = size;
+            }
+
+            if (rgba == 0)
+            {
+                // Even the smallest probe failed. Keep a size the framework cannot work without rather than failing outright.
+                rgba = Math.Min(reported, 1024);
+                singleChannel = Math.Max(singleChannel, rgba);
+            }
+
+            return new TextureSizeProbeResult(rgba, singleChannel, allPassed,
+                $"Verified RGBA {rgba}, single-channel {singleChannel}{(allPassed ? string.Empty : " (RGBA probe stopped at a failure)")}.");
+        }
+
+        /// <summary>Cached compatibility evidence. This does not enable bindless rendering.</summary>
+        public BindlessTextureProbeResult BindlessTextureSupport { get; private set; } =
+            new BindlessTextureProbeResult(BindlessTextureProbeStatus.Unknown, "Probe disabled or renderer not initialised.");
+
+        internal void ProbeBindless(string fingerprint, Func<BindlessTextureProbeResult> probe)
+        {
+            if (GraphicsProbeCache == null || !ProbeBindlessTextures)
+                return;
+            try
+            {
+                BindlessTextureSupport = GraphicsProbeCache.GetOrProbe($"{GetType().Name}|{fingerprint}", probe);
+            }
+            catch (Exception e)
+            {
+                BindlessTextureSupport = new BindlessTextureProbeResult(BindlessTextureProbeStatus.Failed, e.Message);
+            }
+            Logging.Logger.Log($"Bindless texture probe: {BindlessTextureSupport.Status}. {BindlessTextureSupport.Details}");
+        }
         internal Configuration.PresentationPreference PresentationPreference { get; set; }
         internal Configuration.VulkanPresentationPreference VulkanPresentationPreference { get; set; }
         internal bool RequestVulkanExclusiveFullscreen { get; set; }
@@ -80,6 +238,9 @@ namespace osu.Framework.Graphics.Rendering
         public Texture WhitePixel => whitePixel.Value;
         DepthValue IRenderer.BackbufferDepth => backBufferDepth;
 
+        // Window surfaces request a depth buffer on every backend.
+        bool IRenderer.TargetHasDepth => FrameBuffer?.HasDepth ?? true;
+
         public bool IsInitialised { get; private set; }
 
         protected ClearInfo CurrentClearInfo { get; private set; }
@@ -110,7 +271,13 @@ namespace osu.Framework.Graphics.Rendering
         private readonly GlobalStatistic<int> vboInUse;
 
         private readonly ConcurrentQueue<ScheduledDelegate> expensiveOperationQueue = new ConcurrentQueue<ScheduledDelegate>();
-        private readonly ConcurrentQueue<INativeTexture> textureUploadQueue = new ConcurrentQueue<INativeTexture>();
+
+        private static readonly long expensive_operation_budget_ticks = Stopwatch.Frequency * 2 / 1000;
+        private readonly Queue<INativeTexture> textureUploadQueue = new Queue<INativeTexture>();
+
+        // Both collections are protected by textureUploadQueue; membership tracks queued entries, not in-progress uploads.
+        private readonly HashSet<INativeTexture> queuedTexturesForUpload = new HashSet<INativeTexture>(ReferenceEqualityComparer.Instance);
+
         private readonly RendererDisposalQueue disposalQueue = new RendererDisposalQueue();
 
         private readonly Scheduler resetScheduler = new Scheduler(() => ThreadSafety.IsDrawThread, new StopwatchClock(true)); // force no thread set until we are actually on the draw thread.
@@ -135,6 +302,89 @@ namespace osu.Framework.Graphics.Rendering
         private readonly INativeTexture?[] lastBoundTexture = new INativeTexture?[16];
         private readonly bool[] lastBoundTextureIsAtlas = new bool[16];
 
+        /// <summary>
+        /// The number of texture units the default texture shader samples, choosing one per vertex (see <c>sh_Texture.fs</c>).
+        /// Must match the shader and the packing in <see cref="StampMaskingIndex{T}(ref T)"/>.
+        /// </summary>
+        internal const int TEXTURE_SLOTS = 4;
+
+        /// <summary>
+        /// Whether the default texture shader may draw textures from several units in one batch.
+        /// Initialised from the TextureSlots framework setting at startup.
+        /// </summary>
+        internal static bool TextureSlotsEnabled { get; set; } = true;
+
+        /// <summary>
+        /// Whether this renderer binds textures to several slots for the default texture shader (see <see cref="TextureSlotsEnabled"/>).
+        /// When false, every texture is bound to unit 0 and the other slots hold the white pixel's texture.
+        /// </summary>
+        protected virtual bool BindsTextureSlots => true;
+
+        /// <summary>
+        /// Whether texture shaders should be compiled to sample several slots. Shaders declaring slots that are never bound leave their
+        /// resource layouts unset, which Vulkan cannot create a pipeline from.
+        /// </summary>
+        internal bool UsesTextureSlotShaders => TextureSlotsEnabled && BindsTextureSlots;
+
+        /// <summary>
+        /// Whether the bound shader is a default texture shader (see <see cref="defaultTextureShaders"/>), cached since vertices consult it.
+        /// </summary>
+        private bool defaultTextureShaderActive;
+
+        /// <summary>
+        /// The unit holding the texture that vertices added now sample. Always 0 unless the default texture shader is bound.
+        /// </summary>
+        private int currentTextureSlot;
+
+        /// <summary>
+        /// Bit <c>i</c> is set when a vertex sampling unit <c>i</c> was added since the last draw, so that unit cannot be rebound without a flush.
+        /// </summary>
+        private int textureSlotsUsedInBatch;
+
+        /// <summary>
+        /// The unit replaced most recently when no unit was free, so replacements rotate through units.
+        /// </summary>
+        private int lastReplacedTextureSlot;
+
+        /// <summary>
+        /// Bit <c>i</c> is set when the texture bound to unit <c>i</c> is single-channel, as last given to <see cref="GlobalUniformData.SingleChannelSlots"/>.
+        /// Unlike <see cref="lastBoundTexture"/>, this is not reset between frames, since the uniform keeps its value.
+        /// </summary>
+        private int singleChannelSlots;
+
+        /// <summary>
+        /// Bit <c>i</c> is set when the texture bound to unit <c>i</c> is sampled with nearest filtering, as last given to
+        /// <see cref="GlobalUniformData.NearestSlots"/>. Only bindless texture tables read it, since they share samplers.
+        /// </summary>
+        private int nearestSlots;
+
+        /// <summary>
+        /// The number of slots the default texture shader samples. Must match <c>G0V0_TEXTURE_SLOT_COUNT</c> in its shaders, and at most 16.
+        /// </summary>
+        protected virtual int TextureSlotCount => TEXTURE_SLOTS;
+
+        /// <summary>
+        /// The texture last bound to a unit (slot), as tracked for batching.
+        /// </summary>
+        protected INativeTexture? GetBoundTexture(int unit) => lastBoundTexture[unit];
+
+        /// <summary>
+        /// Whether a texture is sampled with nearest filtering, for texture tables that share samplers.
+        /// </summary>
+        protected virtual bool UsesNearestFiltering(INativeTexture texture) => false;
+
+        /// <summary>
+        /// Called around draws with the default texture shader, for renderers that bind its slots differently from other shaders' units.
+        /// </summary>
+        protected virtual void BeginTextureSlotDraw()
+        {
+        }
+
+        /// <inheritdoc cref="BeginTextureSlotDraw"/>
+        protected virtual void EndTextureSlotDraw()
+        {
+        }
+
         // in case no other textures are used in the project, create a new atlas as a fallback source for the white pixel area (used to draw boxes etc.)
         private readonly Lazy<TextureWhitePixel> whitePixel;
         private readonly LockedWeakList<Texture> allTextures = new LockedWeakList<Texture>();
@@ -143,6 +393,13 @@ namespace osu.Framework.Graphics.Rendering
         private IVertexBatch<TexturedVertex2D>? defaultQuadBatch;
         private IVertexBatch? currentActiveBatch;
         private MaskingInfo currentMaskingInfo;
+        private MaskingInfo appliedMaskingInfo;
+        private bool appliedMaskingActive;
+        private RectangleI? appliedScissor;
+        private bool appliedScissorEnabled;
+        private RectangleI? appliedHardwareScissor;
+        private bool appliedClipsInShader;
+        private bool maskingStatePending;
         private int lastActiveTextureUnit;
         private bool globalUniformsChanged;
 
@@ -208,6 +465,7 @@ namespace osu.Framework.Graphics.Rendering
             Debug.Assert(defaultQuadBatch != null);
 
             FrameIndex++;
+            drawCapture?.Begin(FrameIndex, windowSize, GetType().Name);
 
             backBufferDepth.Reset();
 
@@ -215,19 +473,32 @@ namespace osu.Framework.Graphics.Rendering
 
             statExpensiveOperationsQueued.Value = expensiveOperationQueue.Count;
 
+            // Run at least one pending operation, then continue while within a small budget. With cached shader binaries most
+            // operations are short, and draining several per frame lets loading screens finish shader initialisation before
+            // anything binds those shaders (which would otherwise initialise them inline, mid-frame).
+            long budgetEnd = Stopwatch.GetTimestamp() + expensive_operation_budget_ticks;
+
             while (expensiveOperationQueue.TryDequeue(out ScheduledDelegate? operation))
             {
-                if (operation.State == ScheduledDelegate.RunState.Waiting)
-                {
-                    operation.RunTask();
+                if (operation.State != ScheduledDelegate.RunState.Waiting)
+                    continue;
+
+                operation.RunTask();
+
+                if (Stopwatch.GetTimestamp() >= budgetEnd)
                     break;
-                }
             }
 
             globalUniformsChanged = true;
             currentActiveBatch = null;
             CurrentBlendingParameters = new BlendingParameters();
             currentMaskingInfo = default;
+            appliedMaskingInfo = default;
+            appliedMaskingActive = false;
+            invalidateAppliedScissor();
+            maskingBufferIndex = 0;
+            nextMaskingEntry = 0;
+            appliedMaskingEntry = -1;
 
             foreach (var b in batchResetList)
                 b.ResetCounters();
@@ -235,6 +506,9 @@ namespace osu.Framework.Graphics.Rendering
 
             Shader?.Unbind();
             Shader = null;
+            defaultTextureShaderActive = false;
+            currentTextureSlot = 0;
+            textureSlotsUsedInBatch = 0;
 
             boundUniformBuffers.Clear();
             viewportStack.Clear();
@@ -280,17 +554,22 @@ namespace osu.Framework.Graphics.Rendering
             freeUnusedVertexBuffers();
             vboInUse.Value = vertexBuffersInUse.Count;
 
-            statTextureUploadsQueued.Value = textureUploadQueue.Count;
+            int queuedUploadCount;
+
+            lock (textureUploadQueue)
+                queuedUploadCount = textureUploadQueue.Count;
+
+            statTextureUploadsQueued.Value = queuedUploadCount;
             statTextureUploadsDequeued.Value = 0;
             statTextureUploadsPerformed.Value = 0;
 
             // increase the number of items processed with the queue length to ensure it doesn't get out of hand.
-            int targetUploads = Math.Clamp(textureUploadQueue.Count / 2, 1, MaxTexturesUploadedPerFrame);
+            int targetUploads = Math.Clamp(queuedUploadCount / 2, 1, MaxTexturesUploadedPerFrame);
             int uploads = 0;
             int uploadedPixels = 0;
 
             // continue attempting to upload textures until enough uploads have been performed.
-            while (textureUploadQueue.TryDequeue(out INativeTexture? texture))
+            while (tryDequeueTextureUpload(out INativeTexture? texture))
             {
                 statTextureUploadsDequeued.Value++;
 
@@ -308,6 +587,7 @@ namespace osu.Framework.Graphics.Rendering
 
             lastBoundTexture.AsSpan().Clear();
             lastBoundTextureIsAtlas.AsSpan().Clear();
+            textureBoundForCurrentFrameBuffer = false;
         }
 
         /// <summary>
@@ -316,6 +596,7 @@ namespace osu.Framework.Graphics.Rendering
         protected internal virtual void FinishFrame()
         {
             FlushCurrentBatch(FlushBatchSource.FinishFrame);
+            drawCapture?.Finish();
         }
 
         public void ScheduleExpensiveOperation(ScheduledDelegate operation)
@@ -476,8 +757,10 @@ namespace osu.Framework.Graphics.Rendering
             if (Viewport == viewport)
                 return;
 
+            FlushCurrentBatch(FlushBatchSource.SetScissor);
             SetViewportImplementation(viewport);
             Viewport = viewport;
+            invalidateAppliedScissor();
         }
 
         /// <summary>
@@ -549,17 +832,8 @@ namespace osu.Framework.Graphics.Rendering
             if (Scissor == scissor)
                 return;
 
-            // when rendering to a framebuffer on a backend which has the UV origin set to bottom-left (OpenGL),
-            // vertex positions are flipped vertically in sh_Vertex_Output.h to match that UV origin.
-            // for scissoring to continue to work correctly with that, the scissor box has to be inverted too.
-            var compensatedScissor = scissor;
-            if (!UsingBackbuffer && !IsUvOriginTopLeft)
-                compensatedScissor.Y = Viewport.Height - scissor.Bottom;
-
-            FlushCurrentBatch(FlushBatchSource.SetScissor);
-            SetScissorImplementation(compensatedScissor.Intersect(Viewport));
-            // do not expose the implementation detail of flipping the scissor box to Scissor readers.
             Scissor = scissor;
+            maskingStatePending = true;
         }
 
         private void setScissorState(bool enabled)
@@ -570,6 +844,9 @@ namespace osu.Framework.Graphics.Rendering
             FlushCurrentBatch(FlushBatchSource.SetScissor);
             SetScissorStateImplementation(enabled);
             ScissorState = enabled;
+
+            // Shader-side clipping follows the scissor state.
+            maskingStatePending = true;
         }
 
         private void setScissorOffset(Vector2I offset)
@@ -642,11 +919,6 @@ namespace osu.Framework.Graphics.Rendering
 
         private void setMaskingInfo(MaskingInfo maskingInfo, bool isPushing, bool overwritePreviousScissor)
         {
-            if (CurrentMaskingInfo == maskingInfo)
-                return;
-
-            FlushCurrentBatch(FlushBatchSource.SetMasking);
-
             if (isPushing)
             {
                 // When drawing to a viewport that doesn't match the projection size (e.g. via framebuffers), the resultant image will be scaled
@@ -671,7 +943,343 @@ namespace osu.Framework.Graphics.Rendering
 
             // Masking is enabled for as long as any masking info is active that's not the default.
             IsMaskingActive = maskingStack.Count > 1;
-            globalUniformsChanged = true;
+            maskingStatePending = true;
+        }
+
+        /// <summary>
+        /// Applies the logical clipping state before new geometry is submitted. Intermediate
+        /// push/pop transitions without geometry must not split otherwise compatible batches.
+        /// </summary>
+        /// <param name="batch">The batch that geometry is about to be added to, or null for direct draws.</param>
+        internal void ApplyPendingMaskingState(IVertexBatch? batch = null)
+        {
+            if (!maskingStatePending || retainAppliedMaskingForQuad)
+                return;
+
+            var scissor = getEffectiveScissor();
+            bool clipInShader = canClipInShader(batch);
+            RectangleI hardwareScissor = clipInShader ? getViewportScissor() : scissor;
+
+            bool maskChanged = appliedMaskingActive != IsMaskingActive
+                               || !appliedMaskingInfo.HasSameShaderParameters(currentMaskingInfo);
+            bool scissorChanged = appliedScissor != scissor || appliedScissorEnabled != ScissorState;
+            bool hardwareScissorChanged = appliedHardwareScissor != hardwareScissor;
+
+            // Geometry clipped in shaders carries its masking buffer entry, so only the hardware scissor affects it.
+            // Other geometry reads global uniforms and the hardware scissor, which must not change under it.
+            if (hardwareScissorChanged || ((maskChanged || scissorChanged) && !appliedClipsInShader))
+                FlushCurrentBatch(maskChanged ? FlushBatchSource.SetMasking : FlushBatchSource.SetScissor);
+
+            appliedMaskingInfo = currentMaskingInfo;
+            appliedMaskingActive = IsMaskingActive;
+            appliedScissor = scissor;
+            appliedScissorEnabled = ScissorState;
+
+            if (maskChanged || scissorChanged || appliedMaskingEntry < 0)
+            {
+                appendMaskingEntry();
+                globalUniformsChanged = true;
+            }
+
+            if (hardwareScissorChanged)
+            {
+                SetScissorImplementation(hardwareScissor);
+                appliedHardwareScissor = hardwareScissor;
+            }
+
+            appliedClipsInShader = clipInShader;
+            maskingStatePending = false;
+        }
+
+        private void invalidateAppliedScissor()
+        {
+            appliedScissor = null;
+            appliedHardwareScissor = null;
+            maskingStatePending = true;
+        }
+
+        /// <summary>
+        /// Whether geometry about to be added to <paramref name="batch"/> can be masked and clipped by the bound shader alone, leaving
+        /// the hardware scissor at the whole viewport. This needs vertices that carry a masking buffer entry, a shader that reads it
+        /// (see <see cref="PerVertexMasking"/>), and no depth or stencil writes, which shader clipping would not prevent.
+        /// </summary>
+        private bool canClipInShader(IVertexBatch? batch)
+            => batch is IVertexBatch<TexturedVertex2D>
+               && Shader is IPerVertexMaskingShader { UsesPerVertexMasking: true }
+               && !CurrentDepthInfo.WriteDepth
+               && !CurrentStencilInfo.StencilTest;
+
+        /// <summary>
+        /// The hardware scissor covering the whole viewport, in the same space as <see cref="getEffectiveScissor"/>.
+        /// </summary>
+        private RectangleI getViewportScissor()
+        {
+            var scissor = Viewport;
+            if (!UsingBackbuffer && !IsUvOriginTopLeft)
+                scissor.Y = Viewport.Height - scissor.Bottom;
+            return scissor.Intersect(Viewport);
+        }
+
+        #region Masking buffer
+
+        // Must match the uniform-block fallback length in sh_GlobalUniforms.h.
+        private const int masking_buffer_ubo_size = 80;
+        private const int masking_buffer_ssbo_size = 4096;
+        private const string masking_buffer_name = "g_MaskingBuffer";
+
+        private readonly List<IShaderStorageBufferObject<MaskingData>> maskingBuffers = new List<IShaderStorageBufferObject<MaskingData>>();
+        private IUniformBuffer? boundMaskingBuffer;
+        private int maskingBufferIndex;
+        private int nextMaskingEntry;
+
+        /// <summary>
+        /// The applied state's entry in the current masking buffer. Entries are only appended during a frame, so geometry keeps
+        /// referring to the state it was submitted with.
+        /// </summary>
+        private int appliedMaskingEntry = -1;
+
+        private void appendMaskingEntry()
+        {
+            if (maskingBuffers.Count == 0)
+                maskingBuffers.Add(((IRenderer)this).CreateShaderStorageBufferObject<MaskingData>(masking_buffer_ubo_size, masking_buffer_ssbo_size));
+
+            if (nextMaskingEntry >= maskingBuffers[maskingBufferIndex].Size)
+            {
+                // Pending geometry refers to entries in the current buffer.
+                FlushCurrentBatch(FlushBatchSource.StorageBufferOverflow);
+
+                maskingBufferIndex++;
+                nextMaskingEntry = 0;
+
+                if (maskingBufferIndex == maskingBuffers.Count)
+                    maskingBuffers.Add(((IRenderer)this).CreateShaderStorageBufferObject<MaskingData>(masking_buffer_ubo_size, masking_buffer_ssbo_size));
+            }
+
+            var info = appliedMaskingInfo;
+
+            maskingBuffers[maskingBufferIndex][nextMaskingEntry] = new MaskingData
+            {
+                ToMaskingSpace = info.ToMaskingSpace,
+                MaskingRect = new Vector4(info.MaskingRect.Left, info.MaskingRect.Top, info.MaskingRect.Right, info.MaskingRect.Bottom),
+                ScissorRect = getScreenSpaceScissor(),
+                BorderColour = info.BorderThickness > 0
+                    ? new Matrix4(
+                        info.BorderColour.TopLeft.SRGB.R, info.BorderColour.TopLeft.SRGB.G, info.BorderColour.TopLeft.SRGB.B, info.BorderColour.TopLeft.SRGB.A,
+                        info.BorderColour.BottomLeft.SRGB.R, info.BorderColour.BottomLeft.SRGB.G, info.BorderColour.BottomLeft.SRGB.B, info.BorderColour.BottomLeft.SRGB.A,
+                        info.BorderColour.TopRight.SRGB.R, info.BorderColour.TopRight.SRGB.G, info.BorderColour.TopRight.SRGB.B, info.BorderColour.TopRight.SRGB.A,
+                        info.BorderColour.BottomRight.SRGB.R, info.BorderColour.BottomRight.SRGB.G, info.BorderColour.BottomRight.SRGB.B, info.BorderColour.BottomRight.SRGB.A)
+                    : default,
+                CornerRadius = info.CornerRadius,
+                CornerExponent = info.CornerExponent,
+                BorderThickness = info.BorderThickness / info.BlendRange,
+                MaskingBlendRange = info.BlendRange,
+                AlphaExponent = info.AlphaExponent,
+                InnerCornerRadius = info.Hollow ? info.HollowCornerRadius : 0,
+                EdgeOffset = info.EdgeOffset,
+                IsMasking = appliedMaskingActive,
+                DiscardInner = info.Hollow,
+            };
+
+            appliedMaskingEntry = nextMaskingEntry++;
+        }
+
+        /// <summary>
+        /// The applied scissor in the space of vertex positions, for clipping in shaders. This inverts the mapping used for masking
+        /// AABBs in <see cref="setMaskingInfo"/>, so a pixel centre passes exactly when it lies inside the hardware scissor.
+        /// </summary>
+        private Vector4 getScreenSpaceScissor()
+        {
+            if (!ScissorState)
+                return new Vector4(float.MinValue, float.MinValue, float.MaxValue, float.MaxValue);
+
+            Vector2 projectionScale = new Vector2(ProjectionMatrix.Row0.X / 2, -ProjectionMatrix.Row1.Y / 2);
+            Vector2 viewportScale = Vector2.Multiply(Viewport.Size, projectionScale);
+
+            if (viewportScale.X == 0 || viewportScale.Y == 0)
+                return new Vector4(float.MinValue, float.MinValue, float.MaxValue, float.MaxValue);
+
+            RectangleI scissor = Scissor.Intersect(Viewport);
+
+            Vector2 a = Vector2.Divide(new Vector2(scissor.Left, scissor.Top), viewportScale) + ScissorOffset;
+            Vector2 b = Vector2.Divide(new Vector2(scissor.Right, scissor.Bottom), viewportScale) + ScissorOffset;
+
+            return new Vector4(MathF.Min(a.X, b.X), MathF.Min(a.Y, b.Y), MathF.Max(a.X, b.X), MathF.Max(a.Y, b.Y));
+        }
+
+        /// <summary>
+        /// Sets a vertex's masking buffer entry to the applied state's, for vertex types that carry one.
+        /// </summary>
+        internal void StampMaskingIndex<T>(ref T vertex)
+            where T : unmanaged
+        {
+            if (typeof(T) == typeof(TexturedVertex2D))
+            {
+                Unsafe.As<T, TexturedVertex2D>(ref vertex).MaskingIndex = (appliedMaskingEntry + 1) * TextureSlotCount + currentTextureSlot;
+                textureSlotsUsedInBatch |= 1 << currentTextureSlot;
+            }
+        }
+
+        /// <summary>
+        /// Sets the masking buffer entry of each vertex, for vertex types that carry one.
+        /// </summary>
+        /// <returns><paramref name="vertices"/>, or a stamped copy of them in <paramref name="scratch"/>.</returns>
+        internal ReadOnlySpan<T> StampMaskingIndex<T>(ReadOnlySpan<T> vertices, Span<T> scratch)
+            where T : unmanaged
+        {
+            if (typeof(T) != typeof(TexturedVertex2D))
+                return vertices;
+
+            vertices.CopyTo(scratch);
+            scratch = scratch[..vertices.Length];
+
+            for (int i = 0; i < scratch.Length; i++)
+                StampMaskingIndex(ref scratch[i]);
+
+            return scratch;
+        }
+
+        #endregion
+
+        private RectangleI getEffectiveScissor()
+        {
+            // Match the framebuffer UV-origin compensation used by the vertex shader.
+            var scissor = Scissor;
+            if (!UsingBackbuffer && !IsUvOriginTopLeft)
+                scissor.Y = Viewport.Height - scissor.Bottom;
+            return scissor.Intersect(Viewport);
+        }
+
+        /// <summary>
+        /// Masking-space margin added to the unaffected interior, absorbing CPU/GPU transform rounding.
+        /// </summary>
+        private const float masking_interior_margin = 1;
+
+        /// <summary>
+        /// Instances of the framework's default <c>Texture2D/Texture</c> shader. Its output depends on clipping state only through
+        /// <c>getRoundedColor()</c> in <c>sh_Masking.h</c>, and it supports untextured quads (see <see cref="CanDrawUntextured"/>).
+        /// </summary>
+        private readonly ConditionalWeakTable<IShader, object?> defaultTextureShaders = new ConditionalWeakTable<IShader, object?>();
+
+        private bool isDefaultTextureShaderBound => defaultTextureShaderActive;
+
+        private bool retainAppliedMaskingForQuad;
+
+        /// <summary>
+        /// Allows a quad to join the current batch under the applied clipping state instead of applying a pending one.
+        /// <para>
+        /// Inside the unaffected interior of a mask (clear of rounded corners, borders and the blend range) and inside its
+        /// scissor, <c>getRoundedColor()</c> reduces to the content colour, attenuated only by the quad's own vertex blend range
+        /// raised to the mask's alpha exponent. If a quad lies in that interior for both the applied and the pending state,
+        /// and the alpha exponents agree, the two states are interchangeable for it. This is common for text and icons within
+        /// nested rounded containers, where every container otherwise splits the batch twice.
+        /// </para>
+        /// </summary>
+        /// <returns>Whether the applied state was retained. If so, <see cref="EndRetainAppliedMasking"/> must follow the submission.</returns>
+        internal bool TryRetainAppliedMasking(object batch, in Quad quad, Vector2 blendRange)
+        {
+            if (!maskingStatePending || appliedScissor is not RectangleI applied)
+                return false;
+
+            // Geometry masked in shaders does not split batches anyway, and retaining would bypass switching between hardware
+            // and shader clipping.
+            if (appliedClipsInShader || canClipInShader(batch as IVertexBatch))
+                return false;
+
+            if (!isDefaultTextureShaderBound)
+                return false;
+
+            // Without a vertex blend range, unmasked drawing returns the content colour directly. With one, the full masking
+            // path runs even when unmasked (against the root masking info), so the interior test applies to both states.
+            bool vertexBlend = blendRange != Vector2.Zero;
+
+            if (vertexBlend && appliedMaskingInfo.AlphaExponent != currentMaskingInfo.AlphaExponent)
+                return false;
+
+            if (!isInsideScissor(quad, applied) || !isInsideScissor(quad, getEffectiveScissor()))
+                return false;
+
+            if (!isInsideMaskingInterior(quad, appliedMaskingInfo, appliedMaskingActive || vertexBlend)
+                || !isInsideMaskingInterior(quad, currentMaskingInfo, IsMaskingActive || vertexBlend))
+                return false;
+
+            retainAppliedMaskingForQuad = true;
+            return true;
+        }
+
+        internal void EndRetainAppliedMasking() => retainAppliedMaskingForQuad = false;
+
+        private bool isInsideScissor(in Quad quad, RectangleI scissor)
+        {
+            // Same mapping as used for masking AABBs in setMaskingInfo() and getEffectiveScissor().
+            Vector2 projectionScale = new Vector2(ProjectionMatrix.Row0.X / 2, -ProjectionMatrix.Row1.Y / 2);
+            Vector2 viewportScale = Vector2.Multiply(Viewport.Size, projectionScale);
+
+            RectangleF aabb = quad.AABBFloat;
+            Vector2 topLeft = (aabb.TopLeft - ScissorOffset) * viewportScale;
+            Vector2 bottomRight = (aabb.BottomRight - ScissorOffset) * viewportScale;
+
+            float left = MathF.Min(topLeft.X, bottomRight.X);
+            float right = MathF.Max(topLeft.X, bottomRight.X);
+            float top = MathF.Min(topLeft.Y, bottomRight.Y);
+            float bottom = MathF.Max(topLeft.Y, bottomRight.Y);
+
+            if (!UsingBackbuffer && !IsUvOriginTopLeft)
+                (top, bottom) = (Viewport.Height - bottom, Viewport.Height - top);
+
+            // Inequalities are written so that NaN fails.
+            return left >= scissor.Left && right <= scissor.Right && top >= scissor.Top && bottom <= scissor.Bottom;
+        }
+
+        private static bool isInsideMaskingInterior(in Quad quad, in MaskingInfo info, bool evaluated)
+        {
+            if (!evaluated)
+                return true;
+
+            if (info.Hollow || !(info.BlendRange > 0) || !(info.CornerRadius >= 0) || !(info.BorderThickness >= 0))
+                return false;
+
+            // In sh_Masking.h, a point at distance e from the nearest straight edge (and not within a corner square) has
+            // dist = radius - e, while corner squares use the rounded distance. Content colour is unaffected when
+            // dist <= radius + radiusCorrection - max(blendRange, borderThickness), i.e. e >= edgeInset below. The unaffected
+            // region therefore contains the union of a horizontal and a vertical band, each avoiding the corner squares.
+            float radius = info.CornerRadius;
+            float radiusCorrection = radius <= 0 ? info.BlendRange : MathF.Max(0, info.BlendRange - radius);
+            float edgeInset = MathF.Max(info.BlendRange, info.BorderThickness) - radiusCorrection + masking_interior_margin;
+            float cornerInset = MathF.Max(radius + masking_interior_margin, edgeInset);
+
+            RectangleF rect = info.MaskingRect;
+            var horizontalBand = RectangleF.FromLTRB(rect.Left + edgeInset, rect.Top + cornerInset, rect.Right - edgeInset, rect.Bottom - cornerInset);
+            var verticalBand = RectangleF.FromLTRB(rect.Left + cornerInset, rect.Top + edgeInset, rect.Right - cornerInset, rect.Bottom - edgeInset);
+
+            // The masking-space image of a convex quad is contained in an axis-aligned rectangle if its corners' bounds are.
+            if (!tryTransform(quad.TopLeft, info.ToMaskingSpace, out Vector2 a)
+                || !tryTransform(quad.TopRight, info.ToMaskingSpace, out Vector2 b)
+                || !tryTransform(quad.BottomLeft, info.ToMaskingSpace, out Vector2 c)
+                || !tryTransform(quad.BottomRight, info.ToMaskingSpace, out Vector2 d))
+                return false;
+
+            var bounds = RectangleF.FromLTRB(
+                MathF.Min(MathF.Min(a.X, b.X), MathF.Min(c.X, d.X)),
+                MathF.Min(MathF.Min(a.Y, b.Y), MathF.Min(c.Y, d.Y)),
+                MathF.Max(MathF.Max(a.X, b.X), MathF.Max(c.X, d.X)),
+                MathF.Max(MathF.Max(a.Y, b.Y), MathF.Max(c.Y, d.Y)));
+
+            return contains(horizontalBand, bounds) || contains(verticalBand, bounds);
+
+            // Inequalities are written so that NaN fails.
+            static bool contains(in RectangleF outer, in RectangleF inner)
+                => inner.Left >= outer.Left && inner.Right <= outer.Right && inner.Top >= outer.Top && inner.Bottom <= outer.Bottom;
+
+            static bool tryTransform(Vector2 position, in Matrix3 m, out Vector2 result)
+            {
+                // Matches sh_Texture2D.vs, including the homogeneous divide.
+                float x = m.Row0.X * position.X + m.Row1.X * position.Y + m.Row2.X;
+                float y = m.Row0.Y * position.X + m.Row1.Y * position.Y + m.Row2.Y;
+                float z = m.Row0.Z * position.X + m.Row1.Z * position.Y + m.Row2.Z;
+
+                result = new Vector2(x / z, y / z);
+                return z > 0;
+            }
         }
 
         #endregion
@@ -715,6 +1323,9 @@ namespace osu.Framework.Graphics.Rendering
             SetDepthInfoImplementation(depthInfo);
 
             CurrentDepthInfo = depthInfo;
+
+            // Clipping in shaders does not stop depth writes, so it depends on the depth state.
+            maskingStatePending = true;
         }
 
         private void setStencilInfo(StencilInfo stencilInfo)
@@ -726,6 +1337,9 @@ namespace osu.Framework.Graphics.Rendering
             SetStencilInfoImplementation(stencilInfo);
 
             CurrentStencilInfo = stencilInfo;
+
+            // Clipping in shaders does not stop stencil writes, so it depends on the stencil state.
+            maskingStatePending = true;
         }
 
         /// <summary>
@@ -766,6 +1380,12 @@ namespace osu.Framework.Graphics.Rendering
         /// <param name="batch">The batch.</param>
         internal void SetActiveBatch(IVertexBatch batch)
         {
+            // Whether clipping can happen in the shader depends on the batch's vertex type.
+            if (currentActiveBatch != batch)
+                maskingStatePending = true;
+
+            ApplyPendingMaskingState(batch);
+
             if (currentActiveBatch == batch)
                 return;
 
@@ -782,8 +1402,24 @@ namespace osu.Framework.Graphics.Rendering
         /// <param name="source">The source performing the flush, for profiling purposes.</param>
         protected internal void FlushCurrentBatch(FlushBatchSource? source)
         {
-            if (currentActiveBatch?.Draw() > 0 && source != null)
-                flush_source_statistics[(int)source].Value++;
+            if (drawCapture == null)
+            {
+                if (currentActiveBatch?.Draw() > 0 && source != null)
+                    flush_source_statistics[(int)source].Value++;
+                return;
+            }
+
+            drawCapture.FlushSource = source?.ToString();
+
+            try
+            {
+                if (currentActiveBatch?.Draw() > 0 && source != null)
+                    flush_source_statistics[(int)source].Value++;
+            }
+            finally
+            {
+                drawCapture.FlushSource = null;
+            }
         }
 
         private void freeUnusedVertexBuffers()
@@ -808,7 +1444,8 @@ namespace osu.Framework.Graphics.Rendering
         {
             ObjectDisposedException.ThrowIf(!texture.Available, texture);
 
-            if (texture is TextureWhitePixel && lastBoundTextureIsAtlas[unit])
+            // Vertices sample the current slot when binding to unit 0.
+            if (texture is TextureWhitePixel && lastBoundTextureIsAtlas[unit == 0 ? currentTextureSlot : unit])
             {
                 setWrapMode(wrapModeS ?? texture.WrapModeS, wrapModeT ?? texture.WrapModeT);
 
@@ -819,7 +1456,7 @@ namespace osu.Framework.Graphics.Rendering
             texture.NativeTexture.Upload();
 
             bool didBind = BindTexture(texture.NativeTexture, unit, wrapModeS ?? texture.WrapModeS, wrapModeT ?? texture.WrapModeT);
-            lastBoundTextureIsAtlas[unit] = texture.IsAtlasTexture;
+            lastBoundTextureIsAtlas[unit == 0 ? currentTextureSlot : unit] = texture.IsAtlasTexture && texture.NativeTexture.PixelFormat == TexturePixelFormat.R8G8B8A8Float;
 
             return didBind;
         }
@@ -834,6 +1471,9 @@ namespace osu.Framework.Graphics.Rendering
         /// <returns>Whether the texture was successfully bound.</returns>
         public bool BindTexture(INativeTexture texture, int unit = 0, WrapMode wrapModeS = WrapMode.None, WrapMode wrapModeT = WrapMode.None)
         {
+            if (unit == 0 && defaultTextureShaderActive && TextureSlotsEnabled && BindsTextureSlots)
+                return bindTextureSlot(texture, wrapModeS, wrapModeT);
+
             if (lastActiveTextureUnit == unit && lastBoundTexture[unit] == texture)
             {
                 setWrapMode(wrapModeS, wrapModeT);
@@ -846,15 +1486,130 @@ namespace osu.Framework.Graphics.Rendering
                 return false;
 
             setWrapMode(wrapModeS, wrapModeT);
+            setTextureSlotFormat(unit, texture);
+
+            if (unit == 0)
+                currentTextureSlot = 0;
 
             lastBoundTexture[unit] = texture;
             lastBoundTextureIsAtlas[unit] = false;
             lastActiveTextureUnit = unit;
 
+            if (unit == 0)
+                textureBoundForCurrentFrameBuffer = true;
+
             FrameStatistics.Increment(StatisticsCounterType.TextureBinds);
             texture.TotalBindCount++;
 
             return true;
+        }
+
+        /// <summary>
+        /// Binds a texture for the default texture shader to whichever slot (texture unit) lets vertices already in the batch keep theirs.
+        /// Only when every slot is in use by the batch does this flush.
+        /// </summary>
+        private bool bindTextureSlot(INativeTexture texture, WrapMode wrapModeS, WrapMode wrapModeT)
+        {
+            int slot = Array.IndexOf(lastBoundTexture, texture, 0, TextureSlotCount);
+
+            if (slot < 0)
+            {
+                slot = findReplaceableTextureSlot();
+
+                if (slot < 0)
+                {
+                    FlushCurrentBatch(FlushBatchSource.BindTexture);
+                    slot = findReplaceableTextureSlot();
+                }
+
+                if (!SetTextureImplementation(texture, slot))
+                    return false;
+
+                setTextureSlotFormat(slot, texture);
+                lastBoundTexture[slot] = texture;
+                lastBoundTextureIsAtlas[slot] = false;
+                lastActiveTextureUnit = slot;
+
+                FrameStatistics.Increment(StatisticsCounterType.TextureBinds);
+                texture.TotalBindCount++;
+            }
+            else if (lastActiveTextureUnit != slot)
+            {
+                // GL texture uploads bind through here, then write to the active unit's texture. Reattaching the same texture needs no flush.
+                if (!SetTextureImplementation(texture, slot))
+                    return false;
+
+                lastActiveTextureUnit = slot;
+            }
+
+            currentTextureSlot = slot;
+            textureBoundForCurrentFrameBuffer = true;
+
+            // Wrap modes are uniforms for the whole batch, so a change still flushes.
+            setWrapMode(wrapModeS, wrapModeT);
+            return true;
+        }
+
+        /// <summary>
+        /// A slot no vertex in the current batch samples, preferring empty ones, or -1 if all are in use.
+        /// </summary>
+        private int findReplaceableTextureSlot()
+        {
+            for (int i = 0; i < TextureSlotCount; i++)
+            {
+                if (lastBoundTexture[i] == null && (textureSlotsUsedInBatch & (1 << i)) == 0)
+                    return i;
+            }
+
+            for (int i = 1; i <= TextureSlotCount; i++)
+            {
+                int slot = (lastReplacedTextureSlot + i) % TextureSlotCount;
+
+                if ((textureSlotsUsedInBatch & (1 << slot)) == 0)
+                    return lastReplacedTextureSlot = slot;
+            }
+
+            return -1;
+        }
+
+        /// <summary>
+        /// Attaches the white pixel's texture to slots without a texture, which shaders cannot leave unbound.
+        /// </summary>
+        private void fillEmptyTextureSlots()
+        {
+            for (int i = 0; i < TextureSlotCount; i++)
+            {
+                if (lastBoundTexture[i] != null)
+                    continue;
+
+                INativeTexture white = WhitePixel.NativeTexture;
+                white.Upload();
+
+                if (!SetTextureImplementation(white, i))
+                    continue;
+
+                setTextureSlotFormat(i, white);
+                lastBoundTexture[i] = white;
+                lastBoundTextureIsAtlas[i] = WhitePixel.IsAtlasTexture && white.PixelFormat == TexturePixelFormat.R8G8B8A8Float;
+                lastActiveTextureUnit = i;
+            }
+        }
+
+        private void setTextureSlotFormat(int unit, INativeTexture texture)
+        {
+            if (unit >= TextureSlotCount)
+                return;
+
+            int bit = 1 << unit;
+            int slots = texture.PixelFormat == TexturePixelFormat.R8Float ? singleChannelSlots | bit : singleChannelSlots & ~bit;
+            int nearest = UsesNearestFiltering(texture) ? nearestSlots | bit : nearestSlots & ~bit;
+
+            if (slots == singleChannelSlots && nearest == nearestSlots)
+                return;
+
+            singleChannelSlots = slots;
+            nearestSlots = nearest;
+            globalUniformsChanged = true;
         }
 
         private void setWrapMode(WrapMode wrapModeS, WrapMode wrapModeT)
@@ -898,10 +1653,28 @@ namespace osu.Framework.Graphics.Rendering
         /// <param name="texture">The texture to be uploaded.</param>
         internal void EnqueueTextureUpload(INativeTexture texture)
         {
-            if (!IsInitialised || textureUploadQueue.Contains(texture))
+            if (!IsInitialised)
                 return;
 
-            textureUploadQueue.Enqueue(texture);
+            lock (textureUploadQueue)
+            {
+                if (queuedTexturesForUpload.Add(texture))
+                    textureUploadQueue.Enqueue(texture);
+            }
+        }
+
+        private bool tryDequeueTextureUpload([NotNullWhen(true)] out INativeTexture? texture)
+        {
+            // Upload must run after this method returns: SetData schedules while holding the texture's own queue lock.
+            lock (textureUploadQueue)
+            {
+                if (!textureUploadQueue.TryDequeue(out texture))
+                    return false;
+
+                // Release membership before uploading so new data can schedule a subsequent entry.
+                queuedTexturesForUpload.Remove(texture);
+                return true;
+            }
         }
 
         /// <summary>
@@ -943,7 +1716,45 @@ namespace osu.Framework.Graphics.Rendering
 
             UsingBackbuffer = frameBuffer == null;
             globalUniformsChanged = true;
+            invalidateAppliedScissor();
+
+            // The previously bound texture may be this framebuffer's own attachment. Don't leave it attached for untextured draws.
+            textureBoundForCurrentFrameBuffer = false;
+
+            // Nor in any unit the default texture shader samples: treat them as empty, so they are rebound or filled before its next draw.
+            lastBoundTexture.AsSpan(0, TextureSlotCount).Clear();
+            lastBoundTextureIsAtlas.AsSpan(0, TextureSlotCount).Clear();
         }
+
+        /// <summary>
+        /// Whether white pixel quads may use the untextured path. Disabling it restores binding and sampling, for comparison.
+        /// </summary>
+        internal bool UntexturedWhitePixel { get; set; } = true;
+
+        /// <summary>
+        /// Whether a texture was bound to unit 0 since the last framebuffer change.
+        /// </summary>
+        private bool textureBoundForCurrentFrameBuffer;
+
+        /// <summary>
+        /// Whether <paramref name="texture"/> can be drawn without binding it, using the default texture shader's untextured mode.
+        /// <para>
+        /// The white pixel samples as opaque white everywhere within its rectangle. Quads marking <c>TextureRect</c> with
+        /// <see cref="UNTEXTURED_RECT"/> skip wrapping and sampling in <c>sh_Texture.fs</c>, so whichever texture is bound stays
+        /// bound. This avoids flushing when boxes alternate with non-atlas textures, as well as a texture fetch per fragment.
+        /// </para>
+        /// </summary>
+        internal bool CanDrawUntextured(Texture texture)
+            => UntexturedWhitePixel
+               && texture is TextureWhitePixel
+               && texture.WrapModeS == WrapMode.None && texture.WrapModeT == WrapMode.None
+               && textureBoundForCurrentFrameBuffer && lastBoundTexture[0] != null
+               && isDefaultTextureShaderBound;
+
+        /// <summary>
+        /// Texture-space rectangle marking an untextured quad. Must match the threshold in <c>sh_Texture.fs</c>.
+        /// </summary>
+        internal static readonly RectangleF UNTEXTURED_RECT = new RectangleF(-2, -2, 1, 1);
 
         /// <summary>
         /// Informs the graphics device to use the given framebuffer for drawing.
@@ -969,8 +1780,20 @@ namespace osu.Framework.Graphics.Rendering
 
         public void DrawVertices(PrimitiveTopology topology, int vertexStart, int verticesCount)
         {
+            ApplyPendingMaskingState();
+            DrawBatchVertices(topology, vertexStart, verticesCount);
+        }
+
+        // Buffered vertices retain the clipping state from submission, even if the logical
+        // masking stack has since changed. Do not apply pending state while flushing them.
+        internal void DrawBatchVertices(PrimitiveTopology topology, int vertexStart, int verticesCount)
+        {
             if (Shader == null)
                 throw new InvalidOperationException("No shader bound.");
+
+            // The default texture shader declares every slot, so each needs a texture attached, even with slots disabled.
+            if (defaultTextureShaderActive)
+                fillEmptyTextureSlots();
 
             if (globalUniformsChanged)
             {
@@ -981,48 +1804,51 @@ namespace osu.Framework.Graphics.Rendering
                     IsClipSpaceYInverted = IsClipSpaceYInverted,
                     IsUvOriginTopLeft = IsUvOriginTopLeft,
                     ProjMatrix = ProjectionMatrix,
-                    ToMaskingSpace = currentMaskingInfo.ToMaskingSpace,
-                    IsMasking = IsMaskingActive,
-                    CornerRadius = currentMaskingInfo.CornerRadius,
-                    CornerExponent = currentMaskingInfo.CornerExponent,
+                    ToMaskingSpace = appliedMaskingInfo.ToMaskingSpace,
+                    IsMasking = appliedMaskingActive,
+                    CornerRadius = appliedMaskingInfo.CornerRadius,
+                    CornerExponent = appliedMaskingInfo.CornerExponent,
                     MaskingRect = new Vector4(
-                        currentMaskingInfo.MaskingRect.Left,
-                        currentMaskingInfo.MaskingRect.Top,
-                        currentMaskingInfo.MaskingRect.Right,
-                        currentMaskingInfo.MaskingRect.Bottom),
-                    BorderThickness = currentMaskingInfo.BorderThickness / currentMaskingInfo.BlendRange,
-                    BorderColour = currentMaskingInfo.BorderThickness > 0
+                        appliedMaskingInfo.MaskingRect.Left,
+                        appliedMaskingInfo.MaskingRect.Top,
+                        appliedMaskingInfo.MaskingRect.Right,
+                        appliedMaskingInfo.MaskingRect.Bottom),
+                    BorderThickness = appliedMaskingInfo.BorderThickness / appliedMaskingInfo.BlendRange,
+                    BorderColour = appliedMaskingInfo.BorderThickness > 0
                         ? new Matrix4(
                             // TopLeft
-                            currentMaskingInfo.BorderColour.TopLeft.SRGB.R,
-                            currentMaskingInfo.BorderColour.TopLeft.SRGB.G,
-                            currentMaskingInfo.BorderColour.TopLeft.SRGB.B,
-                            currentMaskingInfo.BorderColour.TopLeft.SRGB.A,
+                            appliedMaskingInfo.BorderColour.TopLeft.SRGB.R,
+                            appliedMaskingInfo.BorderColour.TopLeft.SRGB.G,
+                            appliedMaskingInfo.BorderColour.TopLeft.SRGB.B,
+                            appliedMaskingInfo.BorderColour.TopLeft.SRGB.A,
                             // BottomLeft
-                            currentMaskingInfo.BorderColour.BottomLeft.SRGB.R,
-                            currentMaskingInfo.BorderColour.BottomLeft.SRGB.G,
-                            currentMaskingInfo.BorderColour.BottomLeft.SRGB.B,
-                            currentMaskingInfo.BorderColour.BottomLeft.SRGB.A,
+                            appliedMaskingInfo.BorderColour.BottomLeft.SRGB.R,
+                            appliedMaskingInfo.BorderColour.BottomLeft.SRGB.G,
+                            appliedMaskingInfo.BorderColour.BottomLeft.SRGB.B,
+                            appliedMaskingInfo.BorderColour.BottomLeft.SRGB.A,
                             // TopRight
-                            currentMaskingInfo.BorderColour.TopRight.SRGB.R,
-                            currentMaskingInfo.BorderColour.TopRight.SRGB.G,
-                            currentMaskingInfo.BorderColour.TopRight.SRGB.B,
-                            currentMaskingInfo.BorderColour.TopRight.SRGB.A,
+                            appliedMaskingInfo.BorderColour.TopRight.SRGB.R,
+                            appliedMaskingInfo.BorderColour.TopRight.SRGB.G,
+                            appliedMaskingInfo.BorderColour.TopRight.SRGB.B,
+                            appliedMaskingInfo.BorderColour.TopRight.SRGB.A,
                             // BottomRight
-                            currentMaskingInfo.BorderColour.BottomRight.SRGB.R,
-                            currentMaskingInfo.BorderColour.BottomRight.SRGB.G,
-                            currentMaskingInfo.BorderColour.BottomRight.SRGB.B,
-                            currentMaskingInfo.BorderColour.BottomRight.SRGB.A)
+                            appliedMaskingInfo.BorderColour.BottomRight.SRGB.R,
+                            appliedMaskingInfo.BorderColour.BottomRight.SRGB.G,
+                            appliedMaskingInfo.BorderColour.BottomRight.SRGB.B,
+                            appliedMaskingInfo.BorderColour.BottomRight.SRGB.A)
                         : globalUniformBuffer.Data.BorderColour,
-                    MaskingBlendRange = currentMaskingInfo.BlendRange,
-                    AlphaExponent = currentMaskingInfo.AlphaExponent,
-                    EdgeOffset = currentMaskingInfo.EdgeOffset,
-                    DiscardInner = currentMaskingInfo.Hollow,
-                    InnerCornerRadius = currentMaskingInfo.Hollow
-                        ? currentMaskingInfo.HollowCornerRadius
+                    MaskingBlendRange = appliedMaskingInfo.BlendRange,
+                    AlphaExponent = appliedMaskingInfo.AlphaExponent,
+                    EdgeOffset = appliedMaskingInfo.EdgeOffset,
+                    DiscardInner = appliedMaskingInfo.Hollow,
+                    InnerCornerRadius = appliedMaskingInfo.Hollow
+                        ? appliedMaskingInfo.HollowCornerRadius
                         : globalUniformBuffer.Data.InnerCornerRadius,
                     WrapModeS = (int)CurrentWrapModeS,
-                    WrapModeT = (int)CurrentWrapModeT
+                    WrapModeT = (int)CurrentWrapModeT,
+                    MaskingIndex = Math.Max(appliedMaskingEntry, 0),
+                    SingleChannelSlots = singleChannelSlots,
+                    NearestSlots = nearestSlots,
                 };
 
                 globalUniformsChanged = false;
@@ -1030,8 +1856,27 @@ namespace osu.Framework.Graphics.Rendering
 
             Shader.BindUniformBlock("g_GlobalUniforms", globalUniformBuffer!);
 
-            DrawVerticesImplementation(topology, vertexStart, verticesCount);
+            // Bound without flushing: a flush is in progress, and the buffer only changes after a flush on overflow.
+            if (maskingBuffers.Count > 0 && (boundMaskingBuffer != maskingBuffers[maskingBufferIndex] || !boundUniformBuffers.ContainsKey(masking_buffer_name)))
+            {
+                boundMaskingBuffer = maskingBuffers[maskingBufferIndex];
+                boundUniformBuffers[masking_buffer_name] = boundMaskingBuffer;
+                SetUniformBufferImplementation(masking_buffer_name, boundMaskingBuffer);
+            }
 
+            if (defaultTextureShaderActive)
+            {
+                BeginTextureSlotDraw();
+                DrawVerticesImplementation(topology, vertexStart, verticesCount);
+                EndTextureSlotDraw();
+            }
+            else
+                DrawVerticesImplementation(topology, vertexStart, verticesCount);
+
+            // A batch drawing because it is full continues with the primitive being added, which was stamped with the current slot.
+            textureSlotsUsedInBatch = 1 << currentTextureSlot;
+
+            drawCapture?.Record(topology, vertexStart, verticesCount, Shader, lastBoundTexture[0], UsingBackbuffer, currentActiveBatch);
             FrameStatistics.Increment(StatisticsCounterType.DrawCalls);
             FrameStatistics.Add(StatisticsCounterType.VerticesDraw, verticesCount);
         }
@@ -1073,9 +1918,17 @@ namespace osu.Framework.Graphics.Rendering
                 FlushCurrentBatch(FlushBatchSource.SetShader);
                 SetShaderImplementation(shader);
 
+                // Whether clipping can happen in the shader depends on the shader.
+                maskingStatePending = true;
+
                 // importantly, when a shader is unbound, it remains bound in the implementation.
                 // to save VBO flushing overhead, keep reference of the last shader.
                 Shader = shader;
+
+                // Other shaders sample unit 0 only.
+                defaultTextureShaderActive = defaultTextureShaders.TryGetValue(shader, out _);
+                if (!defaultTextureShaderActive)
+                    currentTextureSlot = 0;
             }
         }
 
@@ -1126,6 +1979,28 @@ namespace osu.Framework.Graphics.Rendering
         protected abstract IShader CreateShader(string name, IShaderPart[] parts, ShaderCompilationStore compilationStore);
 
         private IShader? mipmapShader;
+        private IShader? blitShader;
+
+        internal IShader GetBlitShader()
+        {
+            if (blitShader != null)
+                return blitShader;
+
+            var store = new PassthroughShaderStore(
+                new NamespacedResourceStore<byte[]>(
+                    new NamespacedResourceStore<byte[]>(
+                        new DllResourceStore(typeof(Game).Assembly),
+                        @"Resources"),
+                    "Shaders"));
+
+            blitShader = CreateShader("Texture2D", new[]
+            {
+                CreateShaderPart(store, "Texture2D.vs", store.GetRawData("sh_Texture2D.vs"), ShaderPartType.Vertex),
+                CreateShaderPart(store, "Texture.fs", store.GetRawData("sh_Texture.fs"), ShaderPartType.Fragment),
+            }, shaderCompilationStore);
+
+            return blitShader;
+        }
 
         internal IShader GetMipmapShader()
         {
@@ -1168,9 +2043,10 @@ namespace osu.Framework.Graphics.Rendering
         /// <param name="manualMipmaps">Whether manual mipmaps will be uploaded to the texture. If false, the texture will compute mipmaps automatically.</param>
         /// <param name="filteringMode">The filtering mode.</param>
         /// <param name="initialisationColour">The colour to initialise texture levels with (in the case of sub region initial uploads). If null, no initialisation is provided out-of-the-box.</param>
+        /// <param name="textureFormat">The pixel format of the texture.</param>
         /// <returns>The <see cref="INativeTexture"/>.</returns>
         protected abstract INativeTexture CreateNativeTexture(int width, int height, bool manualMipmaps = false, TextureFilteringMode filteringMode = TextureFilteringMode.Linear,
-                                                              Color4? initialisationColour = null);
+                                                              Color4? initialisationColour = null, TexturePixelFormat textureFormat = TexturePixelFormat.R8G8B8A8Float);
 
         /// <summary>
         /// Creates a new <see cref="INativeTexture"/> for video sprites.
@@ -1180,8 +2056,13 @@ namespace osu.Framework.Graphics.Rendering
         /// <returns>The video <see cref="INativeTexture"/>.</returns>
         protected abstract INativeTexture CreateNativeVideoTexture(int width, int height);
 
-        public Texture CreateTexture(int width, int height, bool manualMipmaps, TextureFilteringMode filteringMode, WrapMode wrapModeS, WrapMode wrapModeT, Color4? initialisationColour)
-            => CreateTexture(CreateNativeTexture(width, height, manualMipmaps, filteringMode, initialisationColour), wrapModeS, wrapModeT);
+        public Texture CreateTexture(int width, int height, bool manualMipmaps, TextureFilteringMode filteringMode, WrapMode wrapModeS, WrapMode wrapModeT,
+                                     Color4? initialisationColour)
+            => CreateTexture(width, height, manualMipmaps, filteringMode, wrapModeS, wrapModeT, initialisationColour, TexturePixelFormat.R8G8B8A8Float);
+
+        public Texture CreateTexture(int width, int height, bool manualMipmaps, TextureFilteringMode filteringMode, WrapMode wrapModeS, WrapMode wrapModeT, Color4? initialisationColour,
+                                     TexturePixelFormat textureFormat)
+            => CreateTexture(CreateNativeTexture(width, height, manualMipmaps, filteringMode, initialisationColour, textureFormat), wrapModeS, wrapModeT);
 
         public Texture CreateVideoTexture(int width, int height) => CreateTexture(CreateNativeVideoTexture(width, height));
 
@@ -1238,7 +2119,16 @@ namespace osu.Framework.Graphics.Rendering
         Image<Rgba32> IRenderer.TakeScreenshot() => TakeScreenshot();
         Image<Rgba32>? IRenderer.ExtractFrameBufferData(IFrameBuffer frameBuffer) => ExtractFrameBufferData(frameBuffer);
         IShaderPart IRenderer.CreateShaderPart(IShaderStore store, string name, byte[]? rawData, ShaderPartType partType) => CreateShaderPart(store, name, rawData, partType);
-        IShader IRenderer.CreateShader(string name, IShaderPart[] parts) => CreateShader(name, parts, shaderCompilationStore);
+        IShader IRenderer.CreateShader(string name, IShaderPart[] parts)
+        {
+            IShader shader = CreateShader(name, parts, shaderCompilationStore);
+
+            // The default sprite/text shader only depends on clipping state via getRoundedColor().
+            if (name == $"{VertexShaderDescriptor.TEXTURE_2}/{FragmentShaderDescriptor.TEXTURE}")
+                defaultTextureShaders.AddOrUpdate(shader, null);
+
+            return shader;
+        }
 
         IVertexBatch<TVertex> IRenderer.CreateLinearBatch<TVertex>(int size, int maxBuffers, PrimitiveTopology topology)
         {

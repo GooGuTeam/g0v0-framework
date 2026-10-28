@@ -14,6 +14,11 @@ struct Recording {
     ID3D11Texture2D *textures[16] = {};
     UINT64 accepted = 0, poolDrops = 0, cadenceDrops = 0;
     FrameCompletion *tickets[16] = {};
+    // Offline frames reach the encoder one frame late, once their conversion has finished on the GPU,
+    // so the export thread does not wait for each frame's own conversion.
+    ID3D11Query *conversions[16] = {};
+    int pendingSlot = -1;
+    LONGLONG offlineNext = 0;
 };
 
 API HRESULT g0_record_prepare(ID3D11Device *device) {
@@ -67,6 +72,31 @@ API HRESULT g0_stream_open_configured(ID3D11Device *device, UINT width, UINT hei
 }
 API HRESULT g0_stream_keyframe(Recording *r) { return r ? g0_video_keyframe(r->encoder) : E_INVALIDARG; }
 
+// Spins briefly before sleeping: Sleep(1) can last a whole scheduler tick, longer than most conversions.
+static HRESULT wait_for_query(ID3D11DeviceContext *context, ID3D11Query *query) {
+    const ULONGLONG deadline = GetTickCount64() + 5000;
+    HRESULT hr;
+    for (int attempt = 0; (hr = context->GetData(query, nullptr, 0, 0)) == S_FALSE; attempt++) {
+        if (GetTickCount64() >= deadline) return HRESULT_FROM_WIN32(WAIT_TIMEOUT);
+        if (attempt < 200) YieldProcessor();
+        else if (attempt < 400) SwitchToThread();
+        else Sleep(1);
+    }
+    return hr;
+}
+
+// Hands the previous offline frame to the encoder after its conversion completes.
+static HRESULT write_pending_frame(Recording *r) {
+    const int slot = r->pendingSlot;
+    if (slot < 0) return S_OK;
+    r->pendingSlot = -1;
+    HRESULT hr = wait_for_query(r->context, r->conversions[slot]);
+    if (SUCCEEDED(hr)) hr = g0_video_write(r->encoder, r->textures[slot], &r->tickets[slot]);
+    if (!r->tickets[slot]) release(r->textures[slot]);
+    if (SUCCEEDED(hr)) r->accepted++;
+    return hr;
+}
+
 static HRESULT write_record_frame(Recording *r, ID3D11Texture2D *source, LONGLONG time, bool offline, LONGLONG frameIndex) {
     if (!r || !source || time < 0) return E_INVALIDARG;
     int slot = -1;
@@ -77,7 +107,8 @@ static HRESULT write_record_frame(Recording *r, ID3D11Texture2D *source, LONGLON
             g0_video_frame_release(r->tickets[i]); r->tickets[i] = nullptr;
             release(r->textures[i]);
         }
-        if (!r->tickets[i]) slot = i;
+        // The pending slot holds a converted frame that has no ticket yet.
+        if (!r->tickets[i] && i != r->pendingSlot) slot = i;
     }
     if (slot >= 0 || !offline) break;
     if (GetTickCount64() >= slotDeadline) return HRESULT_FROM_WIN32(WAIT_TIMEOUT);
@@ -99,14 +130,26 @@ static HRESULT write_record_frame(Recording *r, ID3D11Texture2D *source, LONGLON
     }
     hr = r->converter.Convert(r->device, r->context, source, slot, &r->textures[slot]);
     if (FAILED(hr)) return hr;
+    if (offline) {
+        // The immediate context orders this conversion before later writes to the source and scratch textures.
+        if (!r->conversions[slot]) {
+            D3D11_QUERY_DESC query = {D3D11_QUERY_EVENT, 0};
+            hr = r->device->CreateQuery(&query, &r->conversions[slot]);
+            if (FAILED(hr)) { release(r->textures[slot]); return hr; }
+        }
+        r->context->End(r->conversions[slot]); r->context->Flush();
+        hr = write_pending_frame(r);
+        if (FAILED(hr)) { release(r->textures[slot]); return hr; }
+        r->pendingSlot = slot;
+        r->offlineNext = frameIndex + 1;
+        return S_OK;
+    }
     // Source lease is retained by the managed worker until this query completes.
     r->context->End(r->query); r->context->Flush();
-    ULONGLONG deadline = GetTickCount64() + 5000;
-    while ((hr = r->context->GetData(r->query, nullptr, 0, 0)) == S_FALSE && GetTickCount64() < deadline) Sleep(1);
-    if (hr == S_FALSE) hr = HRESULT_FROM_WIN32(WAIT_TIMEOUT);
+    hr = wait_for_query(r->context, r->query);
     if (FAILED(hr)) return hr;
     // Preserve wall-clock gaps on dropped frames at the configured frame rate.
-    LONGLONG index = offline ? frameIndex : time * r->encoder->fps / 10000000;
+    LONGLONG index = time * r->encoder->fps / 10000000;
     if (index < r->encoder->next) { r->cadenceDrops++; release(r->textures[slot]); return S_FALSE; }
     r->encoder->next = index;
     hr = g0_video_write(r->encoder, r->textures[slot], &r->tickets[slot]);
@@ -119,8 +162,12 @@ API HRESULT g0_record_frame(Recording *r, ID3D11Texture2D *source, LONGLONG time
 }
 // Dedicated offline worker only. Explicit indices avoid timestamp quantisation loss.
 API HRESULT g0_record_offline_frame(Recording *r, ID3D11Texture2D *source, LONGLONG index) {
-    if (!r || index < 0 || index != r->encoder->next) return E_INVALIDARG;
+    if (!r || index < 0 || index != r->offlineNext) return E_INVALIDARG;
     return write_record_frame(r, source, 0, true, index);
+}
+// Hands the last offline frame to the encoder. Call before reading statistics or closing.
+API HRESULT g0_record_offline_flush(Recording *r) {
+    return r ? write_pending_frame(r) : E_INVALIDARG;
 }
 API HRESULT g0_record_audio(Recording *r, const float *pcm, UINT frames, LONGLONG position) {
     return g0_video_audio(r->encoder, pcm, frames, position);
@@ -133,7 +180,7 @@ API HRESULT g0_record_close(Recording *r) {
     HRESULT hr = g0_video_close(r->encoder);
     for (int i = 0; i < 16; i++) {
         // COM buffer references protect textures even if finalisation failed.
-        g0_video_frame_release(r->tickets[i]); release(r->textures[i]);
+        g0_video_frame_release(r->tickets[i]); release(r->textures[i]); release(r->conversions[i]);
     }
     const bool ownsCom = r->ownsCom;
     release(r->query); release(r->context); release(r->device); delete r;

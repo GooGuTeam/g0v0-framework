@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -26,6 +26,9 @@ namespace osu.Framework.Graphics.Rendering.Deferred.Events
 
         [FieldOffset(8)]
         private FlushEvent flush;
+
+        [FieldOffset(8)]
+        private DrawStaticMeshEvent drawStaticMesh;
 
         [FieldOffset(8)]
         private ResizeFrameBufferEvent resizeFrameBuffer;
@@ -88,6 +91,12 @@ namespace osu.Framework.Graphics.Rendering.Deferred.Events
         {
             Type = RenderEventType.DrawNodeAction,
             drawNodeAction = @event
+        };
+
+        public static RenderEvent Create(in DrawStaticMeshEvent @event) => new RenderEvent
+        {
+            Type = RenderEventType.DrawStaticMesh,
+            drawStaticMesh = @event
         };
 
         public static RenderEvent Create(in FlushEvent @event) => new RenderEvent
@@ -202,6 +211,12 @@ namespace osu.Framework.Graphics.Rendering.Deferred.Events
         {
             Debug.Assert(@event.Type == RenderEventType.DrawNodeAction);
             return @event.drawNodeAction;
+        }
+
+        public static explicit operator DrawStaticMeshEvent(RenderEvent @event)
+        {
+            Debug.Assert(@event.Type == RenderEventType.DrawStaticMesh);
+            return @event.drawStaticMesh;
         }
 
         public static explicit operator FlushEvent(RenderEvent @event)

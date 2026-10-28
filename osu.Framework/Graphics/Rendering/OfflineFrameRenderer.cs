@@ -28,7 +28,8 @@ namespace osu.Framework.Graphics.Rendering
                 throw new ArgumentException("Export dimensions must be positive even numbers.");
             this.renderer = renderer;
             bounds = new RectangleI(0, 0, width, height);
-            target = renderer.CreateFrameBuffer(TexturePixelFormat.R8G8B8A8Float);
+            // Paths drawn without framebuffers need depth.
+            target = renderer.CreateFrameBuffer(TexturePixelFormat.R8G8B8A8Float, Lines.Path.DirectDrawingEnabled ? new[] { RenderBufferFormat.D16 } : null);
             target.Size = new Vector2(width, height);
         }
 

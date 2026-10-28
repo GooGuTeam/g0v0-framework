@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Diagnostics.CodeAnalysis;
@@ -27,6 +27,8 @@ namespace osu.Framework.Graphics.Veldrid.Buffers
         private readonly int mipLevel;
         private Texture? depthTarget;
 
+        bool IFrameBuffer.HasDepth => depthFormat != null;
+
         private Vector2 size = Vector2.One;
 
         public Vector2 Size
@@ -41,7 +43,7 @@ namespace osu.Framework.Graphics.Veldrid.Buffers
 
                 colourTarget.Width = (int)Math.Ceiling(size.X);
                 colourTarget.Height = (int)Math.Ceiling(size.Y);
-                colourTarget.SetData(new TextureUpload());
+                colourTarget.SetData(colourTarget.CreateEmptyUpload());
                 colourTarget.Upload();
 
                 recreateResources();
@@ -153,7 +155,7 @@ namespace osu.Framework.Graphics.Veldrid.Buffers
             {
                 BypassTextureUploadQueueing = true;
 
-                SetData(new TextureUpload());
+                SetData(CreateEmptyUpload());
                 Upload();
             }
 

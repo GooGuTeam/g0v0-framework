@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Diagnostics;
@@ -204,6 +204,13 @@ namespace osu.Framework.Graphics.Rendering.Deferred
                     case RenderEventType.SetBlendMask:
                     {
                         processEvent((SetBlendMaskEvent)renderEvent);
+                        break;
+                    }
+
+                    case RenderEventType.DrawStaticMesh:
+                    {
+                        var e = (DrawStaticMeshEvent)renderEvent;
+                        context.Dereference<IDeferredStaticMesh>(e.Mesh).Draw(e.Chunk, e.FirstVertex, e.Count);
                         break;
                     }
 

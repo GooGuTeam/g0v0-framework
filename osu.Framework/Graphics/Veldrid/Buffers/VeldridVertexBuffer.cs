@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Diagnostics;
@@ -56,6 +56,29 @@ namespace osu.Framework.Graphics.Veldrid.Buffers
             lastWrittenVertexIndex = Math.Max(lastWrittenVertexIndex, vertexIndex);
 
             return isNewVertex;
+        }
+
+        public void SetVertices(int vertexIndex, ReadOnlySpan<T> vertices, ref int synchronisationBeginIndex, ref int synchronisationEndIndex)
+        {
+            Span<T> destination = getMemory().Slice(vertexIndex, vertices.Length);
+
+            for (int i = 0; i < vertices.Length; i++)
+            {
+                int index = vertexIndex + i;
+
+                // New storage must be uploaded even when its initial values are all zeroes.
+                if (index > lastWrittenVertexIndex || !destination[i].Equals(vertices[i]))
+                {
+                    if (synchronisationBeginIndex == -1)
+                        synchronisationBeginIndex = index;
+
+                    synchronisationEndIndex = index + 1;
+                }
+
+                destination[i] = vertices[i];
+            }
+
+            lastWrittenVertexIndex = Math.Max(lastWrittenVertexIndex, vertexIndex + vertices.Length - 1);
         }
 
         public void UpdateRange(int startIndex, int endIndex)
@@ -142,6 +165,7 @@ namespace osu.Framework.Graphics.Veldrid.Buffers
             buffer = null;
             memoryLease = null;
             stagingBuffer = null;
+            lastWrittenVertexIndex = -1;
 
             LastUseFrameIndex = 0;
         }

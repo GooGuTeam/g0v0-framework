@@ -4,6 +4,7 @@
 using System;
 using System.Linq;
 using osu.Framework.Platform;
+using osu.Framework.Testing.Benchmarking;
 
 namespace osu.Framework.Tests
 {
@@ -12,6 +13,9 @@ namespace osu.Framework.Tests
         [STAThread]
         public static void Main(string[] args)
         {
+            if (BenchmarkProgram.TryRun(args, FrameworkBenchmarkMatrix.Create(), () => new TestGame()))
+                return;
+
             bool benchmark = args.Contains(@"--benchmark");
             bool portable = args.Contains(@"--portable");
             string? testFilter = args.FirstOrDefault(arg => arg.StartsWith("--test-filter=", StringComparison.Ordinal))?.Substring("--test-filter=".Length);

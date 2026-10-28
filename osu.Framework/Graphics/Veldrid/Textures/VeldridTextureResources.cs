@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using Veldrid;
@@ -9,7 +9,7 @@ namespace osu.Framework.Graphics.Veldrid.Textures
     /// <summary>
     /// Stores the underlying <see cref="global::Veldrid.Texture"/> and <see cref="global::Veldrid.Sampler"/> resources of a <see cref="VeldridTexture"/>.
     /// </summary>
-    internal class VeldridTextureResources : IDisposable
+    internal class VeldridTextureResources : IDisposable, IVeldridResourceSetSource
     {
         public readonly Texture Texture;
 

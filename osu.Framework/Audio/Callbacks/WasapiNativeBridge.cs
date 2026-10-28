@@ -148,7 +148,7 @@ namespace osu.Framework.Audio.Callbacks
 
                 if (nativeProcedure != IntPtr.Zero)
                 {
-                    VirtualFree(nativeProcedure, UIntPtr.Zero, MEM_RELEASE);
+                    VirtualFree(nativeProcedure, UIntPtr.Zero, mem_release);
                     nativeProcedure = IntPtr.Zero;
                 }
 
@@ -171,7 +171,7 @@ namespace osu.Framework.Audio.Callbacks
             if (!tryGetBassChannelGetData(out IntPtr bassChannelGetData))
                 return false;
 
-            byte[]? machineCode = null;
+            byte[]? machineCode;
 
             switch (RuntimeInformation.ProcessArchitecture)
             {
@@ -198,15 +198,15 @@ namespace osu.Framework.Audio.Callbacks
                 return false;
 
             // Allocate readable/writable page, copy inlined machine code, then mark as executable/read-only (W^X security)
-            IntPtr mem = VirtualAlloc(IntPtr.Zero, (UIntPtr)machineCode.Length, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+            IntPtr mem = VirtualAlloc(IntPtr.Zero, (UIntPtr)machineCode.Length, mem_commit | mem_reserve, page_readwrite);
             if (mem == IntPtr.Zero)
                 return false;
 
             Marshal.Copy(machineCode, 0, mem, machineCode.Length);
 
-            if (!VirtualProtect(mem, (UIntPtr)machineCode.Length, PAGE_EXECUTE_READ, out _))
+            if (!VirtualProtect(mem, (UIntPtr)machineCode.Length, page_execute_read, out _))
             {
-                VirtualFree(mem, UIntPtr.Zero, MEM_RELEASE);
+                VirtualFree(mem, UIntPtr.Zero, mem_release);
                 return false;
             }
 
@@ -247,7 +247,7 @@ namespace osu.Framework.Audio.Callbacks
                 0xC3                                            // 57: ret
             };
 
-            Array.Copy(BitConverter.GetBytes((long)targetProc), 0, code, 28, 8);
+            Array.Copy(BitConverter.GetBytes(targetProc), 0, code, 28, 8);
             return code;
         }
 
@@ -258,9 +258,9 @@ namespace osu.Framework.Audio.Callbacks
             // BASS_ChannelGetData(DWORD handle [W0], void *buffer [X1], DWORD length [W2]) -> DWORD [W0]
             byte[] code = new byte[]
             {
-                0x02, 0x01, 0x00, 0xB4,                         // 0:  cbz x2, +32 (.zero @ 32 bytes forward)
+                0xC2, 0x01, 0x00, 0xB4,                         // 0:  cbz x2, +56 (.zero @ 56)
                 0x43, 0x00, 0x40, 0xB9,                         // 4:  ldr w3, [x2]
-                0xC3, 0x00, 0x00, 0x34,                         // 8:  cbz w3, +24 (.zero @ 24 bytes forward)
+                0x83, 0x01, 0x00, 0x34,                         // 8:  cbz w3, +48 (.zero @ 56)
                 0xFD, 0x7B, 0xBF, 0xA9,                         // 12: stp x29, x30, [sp, #-16]!
                 0xFD, 0x03, 0x00, 0x91,                         // 16: mov x29, sp
                 0xE2, 0x03, 0x01, 0x2A,                         // 20: mov w2, w1 (length)
@@ -279,7 +279,7 @@ namespace osu.Framework.Audio.Callbacks
                 0, 0, 0, 0, 0, 0, 0, 0
             };
 
-            Array.Copy(BitConverter.GetBytes((long)targetProc), 0, code, 64, 8);
+            Array.Copy(BitConverter.GetBytes(targetProc), 0, code, 64, 8);
             return code;
         }
 
@@ -292,10 +292,10 @@ namespace osu.Framework.Audio.Callbacks
             {
                 0x8B, 0x44, 0x24, 0x0C,                         // 0:  mov eax, [esp + 12] (user)
                 0x85, 0xC0,                                     // 4:  test eax, eax
-                0x74, 0x1E,                                     // 6:  jz .zero (+30 -> 38)
+                0x74, 0x20,                                     // 6:  jz .zero (+32 -> 40)
                 0x8B, 0x08,                                     // 8:  mov ecx, [eax] (handle)
                 0x85, 0xC9,                                     // 10: test ecx, ecx
-                0x74, 0x18,                                     // 12: jz .zero (+24 -> 38)
+                0x74, 0x1A,                                     // 12: jz .zero (+26 -> 40)
                 0xFF, 0x74, 0x24, 0x08,                         // 14: push [esp + 8] (length)
                 0xFF, 0x74, 0x24, 0x08,                         // 18: push [esp + 8] (buffer)
                 0x51,                                           // 22: push ecx (handle)
@@ -366,11 +366,11 @@ namespace osu.Framework.Audio.Callbacks
             return false;
         }
 
-        private const uint MEM_COMMIT = 0x1000;
-        private const uint MEM_RESERVE = 0x2000;
-        private const uint MEM_RELEASE = 0x8000;
-        private const uint PAGE_READWRITE = 0x04;
-        private const uint PAGE_EXECUTE_READ = 0x20;
+        private const uint mem_commit = 0x1000;
+        private const uint mem_reserve = 0x2000;
+        private const uint mem_release = 0x8000;
+        private const uint page_readwrite = 0x04;
+        private const uint page_execute_read = 0x20;
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr VirtualAlloc(IntPtr lpAddress, UIntPtr dwSize, uint flAllocationType, uint flProtect);

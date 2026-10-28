@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 
@@ -11,7 +11,12 @@ namespace osu.Framework.Utils
     public static class RNG
     {
         // Base RNG. Maybe expose methods for re-seeding in the future?
-        private static readonly Random random = new Random();
+        private static Random random = new Random();
+
+        /// <summary>
+        /// Restarts the sequence from <paramref name="seed"/>, so that scenes built from it are the same in every run (see <see cref="Testing.Benchmarking.BenchmarkCaseRunner"/>).
+        /// </summary>
+        internal static void Seed(int seed) => random = new Random(seed);
 
         /// <summary>
         /// Returns a non-negative signed integer.

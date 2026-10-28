@@ -1,7 +1,8 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using osu.Framework.Development;
@@ -52,14 +53,27 @@ namespace osu.Framework.Graphics.Rendering.Deferred
         public void Write(int index, MemoryReference memory)
             => memory.WriteTo(renderer.Context, buffer, index * elementSize);
 
+        // Layouts are created per shader, so a buffer bound to every shader (such as the masking buffer) needs one set per shader.
+        private readonly Dictionary<ResourceLayout, ResourceSet> resourceSets = new Dictionary<ResourceLayout, ResourceSet>();
+
         public ResourceSet GetResourceSet(ResourceLayout layout)
-            => renderer.Factory.CreateResourceSet(new ResourceSetDescription(layout, buffer));
+        {
+            if (!resourceSets.TryGetValue(layout, out var set))
+                resourceSets[layout] = set = renderer.Factory.CreateResourceSet(new ResourceSetDescription(layout, buffer));
+
+            return set;
+        }
 
         public void ResetCounters()
         {
         }
 
         public void Dispose()
-            => buffer.Dispose();
+        {
+            foreach (var set in resourceSets.Values)
+                set.Dispose();
+
+            buffer.Dispose();
+        }
     }
 }

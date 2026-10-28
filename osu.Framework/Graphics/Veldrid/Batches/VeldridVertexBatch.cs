@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -107,6 +107,7 @@ namespace osu.Framework.Graphics.Veldrid.Batches
         public void Add(T v)
         {
             renderer.SetActiveBatch(this);
+            renderer.StampMaskingIndex(ref v);
 
             var buffers = currentVertexBuffers;
 
@@ -135,6 +136,38 @@ namespace osu.Framework.Graphics.Veldrid.Batches
             ++currentVertexIndex;
         }
 
+        public bool TryAddQuad(ReadOnlySpan<T> vertices)
+        {
+            if (vertices.Length != IRenderer.VERTICES_PER_QUAD)
+                throw new ArgumentException(@"A quad must contain exactly four vertices.", nameof(vertices));
+
+            if (Size < IRenderer.VERTICES_PER_QUAD || currentVertexIndex % IRenderer.VERTICES_PER_QUAD != 0 || currentDrawIndex % IRenderer.VERTICES_PER_QUAD != 0)
+                return false;
+
+            renderer.SetActiveBatch(this);
+            Span<T> scratch = stackalloc T[IRenderer.VERTICES_PER_QUAD];
+            ReadOnlySpan<T> stamped = renderer.StampMaskingIndex(vertices, scratch);
+
+            var buffers = currentVertexBuffers;
+
+            if (buffers.Count > 0 && currentVertexIndex >= buffers[currentBufferIndex].Size)
+            {
+                Draw();
+                FrameStatistics.Increment(StatisticsCounterType.VBufOverflow);
+
+                currentBufferIndex++;
+                currentVertexIndex = 0;
+                currentDrawIndex = 0;
+            }
+
+            if (currentBufferIndex >= buffers.Count)
+                buffers.Add(CreateVertexBuffer(renderer));
+
+            buffers[currentBufferIndex].SetVertices(currentVertexIndex, stamped, ref synchronisationBeginIndex, ref synchronisationEndIndex);
+            currentVertexIndex += IRenderer.VERTICES_PER_QUAD;
+            return true;
+        }
+
         /// <summary>
         /// Adds a vertex to this <see cref="VeldridVertexBatch{T}"/>.
         /// This is a cached delegate of <see cref="Add"/> that should be used in memory-critical locations such as <see cref="DrawNode"/>s.
@@ -157,7 +190,7 @@ namespace osu.Framework.Graphics.Veldrid.Batches
 
             renderer.BindVertexBuffer(buffer);
             renderer.BindIndexBuffer(indexLayout, Size);
-            renderer.DrawVertices(primitiveType, drawStartIndex, countToDraw);
+            renderer.DrawBatchVertices(primitiveType, drawStartIndex, countToDraw);
 
             // When using multiple buffers we advance to the next one with every draw to prevent contention on the same buffer with future vertex updates.
             synchronisationBeginIndex = -1;

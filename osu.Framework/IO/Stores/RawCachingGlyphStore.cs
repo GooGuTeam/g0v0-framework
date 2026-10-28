@@ -1,10 +1,11 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -13,9 +14,6 @@ using osu.Framework.Extensions.ObjectExtensions;
 using osu.Framework.Graphics.Textures;
 using osu.Framework.Platform;
 using SharpFNT;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Advanced;
-using SixLabors.ImageSharp.PixelFormats;
 
 namespace osu.Framework.IO.Stores
 {
@@ -104,28 +102,33 @@ namespace osu.Framework.IO.Stores
                 }
 
                 using (var convert = GetPageImage(page))
-                using (var buffer = SixLabors.ImageSharp.Configuration.Default.MemoryAllocator.Allocate<byte>(convert.Width * convert.Height))
                 {
-                    var output = buffer.Memory.Span;
-                    var source = convert.Data;
+                    if (convert == null)
+                        throw new InvalidOperationException($"Could not load page image for font {FontName} page {page}.");
 
-                    for (int i = 0; i < output.Length; i++)
-                        output[i] = source[i].A;
-
-                    // ensure any stale cached versions are deleted.
-                    foreach (string f in CacheStorage.GetFiles(string.Empty, $"{filenameMd5}*"))
-                        CacheStorage.Delete(f);
-
-                    accessFilename += FormattableString.Invariant($"#{convert.Width}#{convert.Height}");
-
-                    using (var outStream = CacheStorage.CreateFileSafely(accessFilename))
-                        outStream.Write(buffer.Memory.Span);
-
-                    return pageLookup[page] = new PageInfo
+                    using (var buffer = new osu.Framework.Allocation.PooledMemoryOwner<byte>(convert.Width * convert.Height))
                     {
-                        Size = new Size(convert.Width, convert.Height),
-                        Filename = accessFilename
-                    };
+                        var output = buffer.Memory.Span;
+                        var source = convert.Data;
+
+                        for (int i = 0; i < output.Length; i++)
+                            output[i] = source[i].A;
+
+                        // ensure any stale cached versions are deleted.
+                        foreach (string f in CacheStorage.GetFiles(string.Empty, $"{filenameMd5}*"))
+                            CacheStorage.Delete(f);
+
+                        accessFilename += FormattableString.Invariant($"#{convert.Width}#{convert.Height}");
+
+                        using (var outStream = CacheStorage.CreateFileSafely(accessFilename))
+                            outStream.Write(buffer.Memory.Span);
+
+                        return pageLookup[page] = new PageInfo
+                        {
+                            Size = new Size(convert.Width, convert.Height),
+                            Filename = accessFilename
+                        };
+                    }
                 }
             }
         }
@@ -141,8 +144,6 @@ namespace osu.Framework.IO.Stores
 
             try
             {
-                var image = new Image<Rgba32>(SixLabors.ImageSharp.Configuration.Default, character.Width, character.Height);
-
                 if (!pageStreamHandles.TryGetValue(page.Filename, out var source))
                     source = pageStreamHandles[page.Filename] = CacheStorage.GetStream(page.Filename);
 
@@ -154,19 +155,35 @@ namespace osu.Framework.IO.Stores
                 int readableHeight = Math.Min(character.Height, page.Size.Height - character.Y);
                 int readableWidth = Math.Min(character.Width, pageWidth - character.X);
 
-                for (int y = 0; y < character.Height; y++)
-                {
-                    var pixelRowMemory = image.DangerousGetPixelRowMemory(y);
-                    var span = pixelRowMemory.Span;
-                    int readOffset = y * pageWidth + character.X;
+                int scale = LowResolutionTextures ? 2 : 1;
+                int width = (character.Width + scale - 1) / scale;
+                int height = (character.Height + scale - 1) / scale;
+                byte[] coverage = new byte[checked(width * height)];
 
-                    for (int x = 0; x < character.Width; x++)
+                for (int y = 0; y < height; y++)
+                {
+                    for (int x = 0; x < width; x++)
                     {
-                        span[x] = new Rgba32(255, 255, 255, x < readableWidth && y < readableHeight ? readBuffer[readOffset + x] : (byte)0);
+                        int total = 0;
+                        int samples = 0;
+
+                        for (int sy = 0; sy < scale; sy++)
+                            for (int sx = 0; sx < scale; sx++)
+                            {
+                                int sourceX = x * scale + sx;
+                                int sourceY = y * scale + sy;
+                                if (sourceX >= readableWidth || sourceY >= readableHeight)
+                                    continue;
+
+                                total += readBuffer[sourceY * pageWidth + character.X + sourceX];
+                                samples++;
+                            }
+
+                        coverage[y * width + x] = samples == 0 ? (byte)0 : (byte)((total + samples / 2) / samples);
                     }
                 }
 
-                return new TextureUpload(image);
+                return new AlphaTextureUpload(width, height, coverage);
             }
             finally
             {

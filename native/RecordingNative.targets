@@ -20,6 +20,7 @@
     <Content Update="$(RecordingNativeDirectory)/g0v0-gpu-video.dll;$(RecordingNativeDirectory)/g0v0-wasapi-capture.dll" Pack="true" PackagePath="runtimes/win-x64/native/" />
     <None Include="$(RecordingNativeDirectory)/g0v0-gpu-video.dll;$(RecordingNativeDirectory)/g0v0-wasapi-capture.dll" Condition="'$(_RecordingDesktopX64)' != 'true'" Pack="true" PackagePath="runtimes/win-x64/native/" Visible="false" />
     <None Include="$(MSBuildThisFileDirectory)g0v0.Framework.targets" Pack="true" PackagePath="buildTransitive/g0v0.Framework.targets" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)WindowsFfmpegExclusion.targets" Pack="true" PackagePath="buildTransitive/WindowsFfmpegExclusion.targets" Visible="false" />
   </ItemGroup>
   <Target Name="ValidateRecordingPackage" BeforeTargets="GenerateNuspec" Condition="'$(PackRecordingNative)' == 'true'">
     <Error Condition="!Exists('$(RecordingNativeDirectory)/g0v0-gpu-video.dll') or !Exists('$(RecordingNativeDirectory)/g0v0-wasapi-capture.dll')" Text="Native recording DLLs are missing. Build or download the win-x64 native artifact before packing." />

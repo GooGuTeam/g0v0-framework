@@ -199,17 +199,22 @@ namespace osu.Framework.Graphics.Textures
         {
             ObjectDisposedException.ThrowIf(!Available, this);
 
+            if (upload is AlphaTextureUpload alpha && NativeTexture.PixelFormat == osu.Framework.Graphics.Rendering.TexturePixelFormat.R8G8B8A8Float)
+                upload = alpha.ToRgbaUpload();
+
             if (upload.Bounds.Width > NativeTexture.MaxSize || upload.Bounds.Height > NativeTexture.MaxSize)
                 throw new TextureTooLargeForGLException();
 
-            if (upload.Bounds.IsEmpty && upload.Data.Length > 0)
+            int bytesPerPixel = upload.Format == osu.Framework.Graphics.Rendering.TexturePixelFormat.R8Float ? 1 : 4;
+
+            if (upload.Bounds.IsEmpty && upload.RawData.Length > 0)
             {
                 upload.Bounds = new RectangleI(0, 0, Width, Height);
 
-                if (upload.Bounds.Width * upload.Bounds.Height > upload.Data.Length)
+                if ((long)upload.Bounds.Width * upload.Bounds.Height * bytesPerPixel > upload.RawData.Length)
                 {
                     throw new InvalidOperationException(
-                        $"Size of texture upload ({upload.Bounds.Width}x{upload.Bounds.Height}) does not contain enough data ({upload.Data.Length} < {upload.Bounds.Width * upload.Bounds.Height})");
+                        $"Size of texture upload ({upload.Bounds.Width}x{upload.Bounds.Height}) does not contain enough data ({upload.RawData.Length} < {(long)upload.Bounds.Width * upload.Bounds.Height * bytesPerPixel})");
                 }
             }
 

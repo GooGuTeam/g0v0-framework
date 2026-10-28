@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -14,26 +14,23 @@ using osuTK.Graphics.ES30;
 
 namespace osu.Framework.Graphics.OpenGL.Shaders
 {
+    /// <summary>
+    /// The preprocessed text of one shader stage. Each <see cref="GLShader"/> compiles its own shader objects from it, since the final text differs between programs.
+    /// </summary>
     internal class GLShaderPart : IShaderPart
     {
         public static readonly Regex SHADER_INPUT_PATTERN = new Regex(@"^\s*layout\s*\(\s*location\s*=\s*(-?\d+)\s*\)\s*(in\s+(?:(?:lowp|mediump|highp)\s+)?\w+\s+(\w+)\s*;)", RegexOptions.Multiline);
         private static readonly Regex uniform_pattern = new Regex(@"^(\s*layout\s*\(.*)set\s*=\s*(-?\d)(.*\)\s*(?:(?:readonly\s*)?buffer|uniform))", RegexOptions.Multiline);
         private static readonly Regex include_pattern = new Regex(@"^\s*#\s*include\s+[""<](.*)["">]");
 
-        internal bool Compiled { get; private set; }
-
         public readonly string Name;
         public readonly ShaderType Type;
 
-        private readonly IRenderer renderer;
         private readonly List<string> shaderCodes = new List<string>();
         private readonly IShaderStore store;
 
-        private int partID = -1;
-
         public GLShaderPart(GLRenderer renderer, string name, byte[]? data, ShaderType type, IShaderStore store)
         {
-            this.renderer = renderer;
             this.store = store;
 
             Name = name;
@@ -145,49 +142,10 @@ namespace osu.Framework.Graphics.OpenGL.Shaders
 
         public string GetRawText() => string.Join('\n', shaderCodes);
 
-        public void Compile(string crossCompileOutput)
-        {
-            if (Compiled)
-                return;
-
-            partID = GL.CreateShader(Type);
-
-            GL.ShaderSource(this, crossCompileOutput);
-            GL.CompileShader(this);
-            GL.GetShader(this, ShaderParameter.CompileStatus, out int compileResult);
-
-            Compiled = compileResult == 1;
-
-            if (!Compiled)
-                throw new GLShader.PartCompilationFailedException(Name, GL.GetShaderInfoLog(this));
-        }
-
-        public static implicit operator int(GLShaderPart program) => program.partID;
-
         #region IDisposable Support
-
-        protected internal bool IsDisposed { get; private set; }
-
-        ~GLShaderPart()
-        {
-            renderer.ScheduleDisposal(static s => s.Dispose(false), this);
-        }
 
         public void Dispose()
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        protected virtual void Dispose(bool disposing)
-        {
-            if (!IsDisposed)
-            {
-                IsDisposed = true;
-
-                if (partID != -1)
-                    GL.DeleteShader(this);
-            }
         }
 
         #endregion

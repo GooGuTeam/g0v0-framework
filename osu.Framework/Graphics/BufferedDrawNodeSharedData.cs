@@ -44,7 +44,28 @@ namespace osu.Framework.Graphics
 
         private readonly RenderBufferFormat[] mainBufferFormats;
         private readonly TextureFilteringMode filterMode;
-        private readonly TexturePixelFormat textureFormat;
+        private TexturePixelFormat textureFormat;
+
+        public TexturePixelFormat TextureFormat
+        {
+            get => textureFormat;
+            set
+            {
+                if (textureFormat == value)
+                    return;
+
+                textureFormat = value;
+
+                if (mainBuffer != null)
+                {
+                    var oldBuffer = mainBuffer;
+                    mainBuffer = null;
+                    renderer?.ScheduleDisposal(static b => b.Dispose(), oldBuffer);
+                }
+
+                DrawVersion = -1;
+            }
+        }
 
         private IRenderer renderer;
         private IFrameBuffer mainBuffer;
@@ -131,7 +152,7 @@ namespace osu.Framework.Graphics
         {
             Debug.Assert(IsInitialised);
 
-            MainBuffer?.Dispose();
+            mainBuffer?.Dispose();
             for (int i = 0; i < effectBuffers.Length; i++)
                 effectBuffers[i]?.Dispose();
         }

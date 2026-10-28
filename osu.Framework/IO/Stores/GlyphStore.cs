@@ -17,9 +17,6 @@ using osu.Framework.Graphics.Textures;
 using osu.Framework.Logging;
 using osu.Framework.Text;
 using SharpFNT;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Advanced;
-using SixLabors.ImageSharp.PixelFormats;
 
 namespace osu.Framework.IO.Stores
 {
@@ -65,22 +62,63 @@ namespace osu.Framework.IO.Stores
 
             AssetName = assetName;
             TextureLoader = textureLoader;
+            asciiHighDefinitionStore = new Lazy<GlyphStore>(loadHighDefinitionStore);
 
             FontName = assetName?.Split('/').Last() ?? string.Empty;
+            resourceNamePrefix = $"{FontName}/";
+            highDefinitionResourceNamePrefix = $"{resourceNamePrefix}{HIGH_DEFINITION_PREFIX}";
         }
 
         private Task fontLoadTask;
-        private GlyphStore asciiHighDefinitionStore;
+        private readonly Lazy<GlyphStore> asciiHighDefinitionStore;
+        private readonly string resourceNamePrefix;
+        private readonly string highDefinitionResourceNamePrefix;
+
+        internal const string HIGH_DEFINITION_PREFIX = "ASCII-HD/";
+
+        internal bool LowResolutionTextures { get; set; }
 
         /// <summary>
         /// Texture resolution multiplier for a printable ASCII glyph. Layout metrics remain those of the original font.
         /// </summary>
-        public float GetTextureScale(char character)
+        public float GetTextureScale(char character) => GetTextureScale(character, false);
+
+        internal float GetTextureScale(char character, bool highDefinition)
         {
-            if (character < ' ' || character > '~' || asciiHighDefinitionStore?.HasGlyph(character) != true)
+            if (LowResolutionTextures)
+                return 0.5f;
+
+            if (!highDefinition || character < ' ' || character > '~')
                 return 1;
 
-            return (float)asciiHighDefinitionStore.Font.Common.LineHeight / Font.Common.LineHeight;
+            var companion = asciiHighDefinitionStore.Value;
+            return companion?.HasGlyph(character) == true ? (float)companion.Font.Common.LineHeight / Font.Common.LineHeight : 1;
+        }
+
+        private GlyphStore loadHighDefinitionStore()
+        {
+            // Resolve only after a large glyph is requested. Never recursively probe companions.
+            if (Font == null || AssetName?.EndsWith("-ASCII-HD", StringComparison.Ordinal) == true)
+                return null;
+
+            using var stream = Store.GetStream($"{AssetName}-ASCII-HD");
+            if (stream == null)
+                return null;
+
+            var candidate = new GlyphStore(Store, $"{AssetName}-ASCII-HD", TextureLoader);
+            try
+            {
+                candidate.LoadFontAsync().GetAwaiter().GetResult();
+                if (candidate.Font.Common.LineHeight > Font.Common.LineHeight)
+                    return candidate;
+            }
+            catch
+            {
+                // A broken optional companion must not prevent loading the original font.
+            }
+
+            candidate.Dispose();
+            return null;
         }
 
         public Task LoadFontAsync() => fontLoadTask ??= Task.Factory.StartNew(() =>
@@ -100,29 +138,6 @@ namespace osu.Framework.IO.Stores
                     else
                     {
                         font_cache.TryAdd(hash, font = BitmapFont.FromStream(s, FormatHint.Binary, false));
-                    }
-                }
-
-                // A companion bitmap font is optional. It must be generated from the same face at a higher resolution.
-                // Probe before loading so existing fonts do not incur missing-resource errors.
-                using (var highDefinition = Store.GetStream($"{AssetName}-ASCII-HD"))
-                {
-                    if (highDefinition != null)
-                    {
-                        var candidate = new GlyphStore(Store, $"{AssetName}-ASCII-HD", TextureLoader);
-                        try
-                        {
-                            candidate.LoadFontAsync().GetAwaiter().GetResult();
-                            if (candidate.Font.Common.LineHeight > font.Common.LineHeight)
-                                asciiHighDefinitionStore = candidate;
-                            else
-                                candidate.Dispose();
-                        }
-                        catch
-                        {
-                            candidate.Dispose();
-                            // A broken optional companion must not prevent loading the original font.
-                        }
                     }
                 }
 
@@ -176,26 +191,26 @@ namespace osu.Framework.IO.Stores
         {
             if (Font == null) return null;
 
-            if (name.Length > 1 && !name.StartsWith($@"{FontName}/", StringComparison.Ordinal))
+            if (name.Length > 1 && !name.StartsWith(resourceNamePrefix, StringComparison.Ordinal))
                 return null;
 
             char character = name.Last();
-            if (GetTextureScale(character) > 1)
-                return asciiHighDefinitionStore.Get(character.ToString());
+            if (GetTextureScale(character, name.StartsWith(highDefinitionResourceNamePrefix, StringComparison.Ordinal)) > 1)
+                return asciiHighDefinitionStore.Value.Get(character.ToString());
 
             return Font.Characters.TryGetValue(character, out Character c) ? LoadCharacter(c) : null;
         }
 
         public virtual async Task<TextureUpload> GetAsync(string name, CancellationToken cancellationToken = default)
         {
-            if (name.Length > 1 && !name.StartsWith($@"{FontName}/", StringComparison.Ordinal))
+            if (name.Length > 1 && !name.StartsWith(resourceNamePrefix, StringComparison.Ordinal))
                 return null;
 
             var bmFont = await completionSource.Task.ConfigureAwait(false);
 
             char character = name.Last();
-            if (GetTextureScale(character) > 1)
-                return await asciiHighDefinitionStore.GetAsync(character.ToString(), cancellationToken).ConfigureAwait(false);
+            if (GetTextureScale(character, name.StartsWith(highDefinitionResourceNamePrefix, StringComparison.Ordinal)) > 1)
+                return await asciiHighDefinitionStore.Value.GetAsync(character.ToString(), cancellationToken).ConfigureAwait(false);
 
             return bmFont.Characters.TryGetValue(character, out Character c)
                 ? LoadCharacter(c)
@@ -207,25 +222,61 @@ namespace osu.Framework.IO.Stores
         protected virtual TextureUpload LoadCharacter(Character character)
         {
             var page = GetPageImage(character.Page);
+            if (page == null)
+                return null;
+
             LoadedGlyphCount++;
 
-            var image = new Image<Rgba32>(SixLabors.ImageSharp.Configuration.Default, character.Width, character.Height);
             var source = page.Data;
 
             // the spritesheet may have unused pixels trimmed
             int readableHeight = Math.Min(character.Height, page.Height - character.Y);
             int readableWidth = Math.Min(character.Width, page.Width - character.X);
 
-            for (int y = 0; y < character.Height; y++)
-            {
-                var pixelRowMemory = image.DangerousGetPixelRowMemory(y);
-                int readOffset = (character.Y + y) * page.Width + character.X;
+            int scale = LowResolutionTextures ? 2 : 1;
+            int width = (character.Width + scale - 1) / scale;
+            int height = (character.Height + scale - 1) / scale;
+            byte[] coverage = new byte[checked(width * height)];
 
-                for (int x = 0; x < character.Width; x++)
-                    pixelRowMemory.Span[x] = x < readableWidth && y < readableHeight ? source[readOffset + x] : new Rgba32(255, 255, 255, 0);
+            if (!LowResolutionTextures)
+            {
+                // The coverage array is zero-initialised, so trimmed source pixels remain transparent.
+                for (int y = 0; y < readableHeight; y++)
+                {
+                    int sourceRow = (character.Y + y) * page.Width + character.X;
+                    int destinationRow = y * width;
+
+                    for (int x = 0; x < readableWidth; x++)
+                        coverage[destinationRow + x] = source[sourceRow + x].A;
+                }
+
+                return new AlphaTextureUpload(width, height, coverage);
             }
 
-            return new TextureUpload(image);
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    int total = 0;
+                    int samples = 0;
+
+                    for (int sy = 0; sy < scale; sy++)
+                        for (int sx = 0; sx < scale; sx++)
+                        {
+                            int sourceX = x * scale + sx;
+                            int sourceY = y * scale + sy;
+                            if (sourceX >= readableWidth || sourceY >= readableHeight)
+                                continue;
+
+                            total += source[(character.Y + sourceY) * page.Width + character.X + sourceX].A;
+                            samples++;
+                        }
+
+                    coverage[y * width + x] = samples == 0 ? (byte)0 : (byte)((total + samples / 2) / samples);
+                }
+            }
+
+            return new AlphaTextureUpload(width, height, coverage);
         }
 
         public Stream GetStream(string name) => throw new NotSupportedException();
@@ -242,8 +293,8 @@ namespace osu.Framework.IO.Stores
 
         protected virtual void Dispose(bool disposing)
         {
-            if (disposing)
-                asciiHighDefinitionStore?.Dispose();
+            if (disposing && asciiHighDefinitionStore.IsValueCreated)
+                asciiHighDefinitionStore.Value?.Dispose();
         }
 
         #endregion

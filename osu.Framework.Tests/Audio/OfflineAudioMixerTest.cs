@@ -5,9 +5,9 @@ using System;
 using System.Runtime.InteropServices;
 using ManagedBass;
 using ManagedBass.Mix;
-using osu.Framework.Audio.Mixing.Bass;
 using NUnit.Framework;
 using osu.Framework.Audio.Mixing;
+using osu.Framework.Audio.Mixing.Bass;
 using osu.Framework.Development;
 
 namespace osu.Framework.Tests.Audio
@@ -29,7 +29,7 @@ namespace osu.Framework.Tests.Audio
             long generatedSamples = 0;
             StreamProcedure source = (_, buffer, length, _) =>
             {
-                var data = new float[length / sizeof(float)];
+                float[] data = new float[length / sizeof(float)];
                 for (int i = 0; i < data.Length; i++)
                     data[i] = 0.125f;
                 Marshal.Copy(data, 0, buffer, data.Length);
@@ -42,7 +42,7 @@ namespace osu.Framework.Tests.Audio
                 stream = Bass.CreateStream(48000, 2, BassFlags.Decode | BassFlags.Float, source);
                 Assert.That(stream, Is.Not.Zero);
                 Assert.That(BassMix.MixerAddChannel(((BassAudioMixer)mixer.Mixer).Handle, stream, BassFlags.MixerChanNoRampin), Is.True);
-                var output = new float[1600];
+                float[] output = new float[1600];
                 for (int i = 0; i < 600; i++)
                 {
                     mixer.Read(output, 800);
@@ -75,7 +75,7 @@ namespace osu.Framework.Tests.Audio
             try
             {
                 using var mixer = new OfflineAudioMixer();
-                var samples = new float[1600];
+                float[] samples = new float[1600];
                 for (int i = 0; i < 600; i++)
                 {
                     System.Array.Fill(samples, 1f);
@@ -141,7 +141,7 @@ namespace osu.Framework.Tests.Audio
                 using var mixer = new OfflineAudioMixer();
                 Assert.That(mixer.PlaySample(sampleId), Is.True);
 
-                var output = new float[1600];
+                float[] output = new float[1600];
                 mixer.Read(output, 800);
                 Assert.That(output, Has.Some.Not.Zero);
 
@@ -184,7 +184,7 @@ namespace osu.Framework.Tests.Audio
                 using var mixer = new OfflineAudioMixer();
                 stream = Bass.CreateStream(48000, 2, BassFlags.Decode | BassFlags.Float, (_, buffer, length, _) =>
                 {
-                    var data = new float[length / sizeof(float)];
+                    float[] data = new float[length / sizeof(float)];
                     for (int i = 0; i < data.Length; i++)
                         data[i] = 0.5f;
                     Marshal.Copy(data, 0, buffer, data.Length);
@@ -193,7 +193,7 @@ namespace osu.Framework.Tests.Audio
                 Assert.That(stream, Is.Not.Zero);
                 Assert.That(mixer.AddChannel(stream), Is.True);
 
-                var output = new float[1600];
+                float[] output = new float[1600];
                 mixer.Read(output, 800);
                 Assert.That(output, Is.All.EqualTo(0.5f).Within(0.0001));
             }

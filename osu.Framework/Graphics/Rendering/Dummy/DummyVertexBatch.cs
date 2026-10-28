@@ -1,12 +1,12 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using osu.Framework.Graphics.Rendering.Vertices;
 
 namespace osu.Framework.Graphics.Rendering.Dummy
 {
-    internal class DummyVertexBatch<T> : IVertexBatch<T>
+    internal class DummyVertexBatch<T> : IVertexBatch<T>, IQuadBatch<T>
         where T : unmanaged, IEquatable<T>, IVertex
     {
         public void Dispose()
@@ -25,6 +25,14 @@ namespace osu.Framework.Graphics.Rendering.Dummy
 
         public void Add(T vertex)
         {
+        }
+
+        public bool TryAddQuad(ReadOnlySpan<T> vertices)
+        {
+            if (vertices.Length != IRenderer.VERTICES_PER_QUAD)
+                throw new ArgumentException(@"A quad must contain exactly four vertices.", nameof(vertices));
+
+            return true;
         }
     }
 }

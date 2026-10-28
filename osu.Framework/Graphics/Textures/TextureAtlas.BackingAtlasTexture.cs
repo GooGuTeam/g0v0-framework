@@ -1,12 +1,12 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Runtime.CompilerServices;
 using osu.Framework.Graphics.Primitives;
 using osu.Framework.Graphics.Rendering;
 using osuTK.Graphics;
-using SixLabors.ImageSharp.PixelFormats;
+using osu.Framework.Imaging;
 
 namespace osu.Framework.Graphics.Textures
 {
@@ -32,8 +32,9 @@ namespace osu.Framework.Graphics.Textures
 
             private static readonly Color4 initialisation_colour = default;
 
-            public BackingAtlasTexture(IRenderer renderer, int width, int height, bool manualMipmaps, TextureFilteringMode filteringMode = TextureFilteringMode.Linear, int padding = 0)
-                : this(renderer.CreateTexture(width, height, manualMipmaps, filteringMode, initialisationColour: initialisation_colour))
+            public BackingAtlasTexture(IRenderer renderer, int width, int height, bool manualMipmaps, TextureFilteringMode filteringMode = TextureFilteringMode.Linear, int padding = 0,
+                                       osu.Framework.Graphics.Rendering.TexturePixelFormat textureFormat = osu.Framework.Graphics.Rendering.TexturePixelFormat.R8G8B8A8Float)
+                : this(renderer.CreateTexture(width, height, manualMipmaps, filteringMode, WrapMode.None, WrapMode.None, initialisation_colour, textureFormat))
             {
                 this.padding = padding;
                 atlasBounds = new RectangleI(0, 0, Width, Height);
@@ -48,10 +49,22 @@ namespace osu.Framework.Graphics.Textures
 
             internal override void SetData(ITextureUpload upload, WrapMode wrapModeS, WrapMode wrapModeT, Opacity? opacity)
             {
+                if (upload is AlphaTextureUpload alpha && NativeTexture.PixelFormat == osu.Framework.Graphics.Rendering.TexturePixelFormat.R8G8B8A8Float)
+                    upload = alpha.ToRgbaUpload();
+
                 // Can only perform padding when the bounds are a sub-part of the texture
                 RectangleI middleBounds = upload.Bounds;
 
-                if (middleBounds.IsEmpty || middleBounds.Width * middleBounds.Height > upload.Data.Length)
+                if (upload.Format == osu.Framework.Graphics.Rendering.TexturePixelFormat.R8Float)
+                {
+                    if (!middleBounds.IsEmpty)
+                        uploadAlphaPadding(upload.RawData, middleBounds, padding / (1 << upload.Level), wrapModeS, wrapModeT);
+
+                    base.SetData(upload, wrapModeS, wrapModeT, Opacity.Mixed);
+                    return;
+                }
+
+                if (middleBounds.IsEmpty || (long)middleBounds.Width * middleBounds.Height * 4 > upload.RawData.Length)
                 {
                     // For a texture atlas, we don't care about opacity, so we avoid
                     // any computations related to it by assuming it to be mixed.
@@ -71,6 +84,39 @@ namespace osu.Framework.Graphics.Textures
                 // For a texture atlas, we don't care about opacity, so we avoid
                 // any computations related to it by assuming it to be mixed.
                 base.SetData(upload, wrapModeS, wrapModeT, Opacity.Mixed);
+            }
+
+            private void uploadAlphaPadding(ReadOnlySpan<byte> upload, RectangleI bounds, int actualPadding, WrapMode wrapModeS, WrapMode wrapModeT)
+            {
+                if (actualPadding == 0)
+                    return;
+
+                uploadAlphaBorder(new RectangleI(bounds.X, bounds.Y - actualPadding, bounds.Width, actualPadding).Intersect(atlasBounds),
+                    upload[0], wrapModeS != WrapMode.None && wrapModeT != WrapMode.None);
+                uploadAlphaBorder(new RectangleI(bounds.X, bounds.Y + bounds.Height, bounds.Width, actualPadding).Intersect(atlasBounds),
+                    upload[(bounds.Height - 1) * bounds.Width], wrapModeS != WrapMode.None && wrapModeT != WrapMode.None);
+                uploadAlphaBorder(new RectangleI(bounds.X - actualPadding, bounds.Y, actualPadding, bounds.Height).Intersect(atlasBounds),
+                    upload[0], wrapModeS != WrapMode.None);
+                uploadAlphaBorder(new RectangleI(bounds.X + bounds.Width, bounds.Y, actualPadding, bounds.Height).Intersect(atlasBounds),
+                    upload[bounds.Width - 1], wrapModeS != WrapMode.None);
+
+                uploadAlphaBorder(new RectangleI(bounds.X - actualPadding, bounds.Y - actualPadding, actualPadding, actualPadding).Intersect(atlasBounds), upload[0], false);
+                uploadAlphaBorder(new RectangleI(bounds.X + bounds.Width, bounds.Y - actualPadding, actualPadding, actualPadding).Intersect(atlasBounds), upload[bounds.Width - 1], false);
+                uploadAlphaBorder(new RectangleI(bounds.X - actualPadding, bounds.Y + bounds.Height, actualPadding, actualPadding).Intersect(atlasBounds), upload[(bounds.Height - 1) * bounds.Width], false);
+                uploadAlphaBorder(new RectangleI(bounds.X + bounds.Width, bounds.Y + bounds.Height, actualPadding, actualPadding).Intersect(atlasBounds), upload[bounds.Width * bounds.Height - 1], false);
+            }
+
+            private void uploadAlphaBorder(RectangleI bounds, byte edge, bool fillOpaque)
+            {
+                // Unwrapped coverage textures already have transparent padding from atlas initialisation.
+                if (bounds.IsEmpty || !fillOpaque || edge == 0)
+                    return;
+
+                byte[] pixels = new byte[checked(bounds.Width * bounds.Height)];
+                Array.Fill(pixels, edge);
+
+                var borderUpload = new AlphaTextureUpload(bounds.Width, bounds.Height, pixels) { Bounds = bounds };
+                base.SetData(borderUpload, WrapMode.None, WrapMode.None, Opacity.Mixed);
             }
 
             private void uploadVerticalPadding(ReadOnlySpan<Rgba32> upload, RectangleI middleBounds, int actualPadding, bool fillOpaque)

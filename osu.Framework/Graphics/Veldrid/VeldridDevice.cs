@@ -5,14 +5,13 @@ using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
+using osu.Framework.Configuration;
 using osu.Framework.Development;
 using osu.Framework.Graphics.Primitives;
 using osu.Framework.Graphics.Rendering;
 using osu.Framework.Logging;
 using osu.Framework.Platform;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
+using osu.Framework.Imaging;
 using Veldrid;
 using Veldrid.OpenGL;
 using Veldrid.OpenGLBindings;
@@ -127,23 +126,47 @@ namespace osu.Framework.Graphics.Veldrid
         private readonly Framebuffer? offlineFramebuffer;
         internal Framebuffer DefaultFramebuffer => offlineFramebuffer ?? Device.SwapchainFramebuffer;
 
-        internal VeldridDevice(uint width, uint height)
+        /// <param name="width">The width of the default framebuffer.</param>
+        /// <param name="height">The height of the default framebuffer.</param>
+        /// <param name="depth">Whether the default framebuffer has a depth attachment, like a window's swapchain.</param>
+        internal VeldridDevice(uint width, uint height, bool depth = false)
         {
-            var options = new GraphicsDeviceOptions { HasMainSwapchain = false, ResourceBindingModel = ResourceBindingModel.Improved };
-            Device = OperatingSystem.IsWindows() ? GraphicsDevice.CreateD3D11(options)
-                : OperatingSystem.IsMacOS() ? GraphicsDevice.CreateMetal(options)
-                : OperatingSystem.IsLinux() ? GraphicsDevice.CreateVulkan(options)
-                : throw new PlatformNotSupportedException(@"No offline graphics backend is available.");
+            var options = new GraphicsDeviceOptions
+            {
+                HasMainSwapchain = false,
+                ResourceBindingModel = ResourceBindingModel.Improved,
+                Debug = FrameworkFeatureFlags.VulkanValidation && (FrameworkFeatureFlags.OfflineVulkanRenderer || OperatingSystem.IsLinux()),
+            };
+
+            // Use the same optional Vulkan capabilities for windowed and offline rendering.
+            if (FrameworkFeatureFlags.OfflineVulkanRenderer || OperatingSystem.IsLinux())
+            {
+                Device = GraphicsDevice.CreateVulkan(options, new VulkanDeviceOptions
+                {
+                    EnableTextureDescriptorIndexing = FrameworkFeatureFlags.VulkanDescriptorIndexing || VeldridBindlessTextures.Requested,
+                });
+            }
+            else
+            {
+                Device = OperatingSystem.IsWindows() ? GraphicsDevice.CreateD3D11(options)
+                    : OperatingSystem.IsMacOS() ? GraphicsDevice.CreateMetal(options)
+                    : throw new PlatformNotSupportedException(@"No offline graphics backend is available.");
+            }
+
             Texture? colour = null;
+            Texture? depthTarget = null;
             try
             {
                 colour = Factory.CreateTexture(TextureDescription.Texture2D(width, height, 1, 1,
                     PixelFormat.R8G8B8A8UNorm, TextureUsage.RenderTarget | TextureUsage.Sampled));
-                offlineFramebuffer = Factory.CreateFramebuffer(new FramebufferDescription(null, colour));
+                if (depth)
+                    depthTarget = Factory.CreateTexture(TextureDescription.Texture2D(width, height, 1, 1, PixelFormat.R16UNorm, TextureUsage.DepthStencil));
+                offlineFramebuffer = Factory.CreateFramebuffer(new FramebufferDescription(depthTarget, colour));
             }
             catch
             {
                 colour?.Dispose();
+                depthTarget?.Dispose();
                 Device.Dispose();
                 throw;
             }
@@ -156,11 +179,45 @@ namespace osu.Framework.Graphics.Veldrid
             if (offlineFramebuffer == null)
                 throw new InvalidOperationException("Not an offline device.");
             Device.WaitForIdle();
+            gpuWaitStaging?.Dispose();
+            gpuWaitCommands?.Dispose();
+            gpuWaitFence?.Dispose();
             var colour = offlineFramebuffer.ColorTargets[0].Target;
+            var depthTarget = offlineFramebuffer.DepthTarget?.Target;
             offlineFramebuffer.Dispose();
             colour.Dispose();
+            depthTarget?.Dispose();
             Device.Dispose();
         }
+
+        private Texture? gpuWaitStaging;
+        private CommandList? gpuWaitCommands;
+        private Fence? gpuWaitFence;
+
+        /// <summary>
+        /// Blocks until the GPU has finished all submitted work, by reading back one pixel of the default framebuffer.
+        /// Unlike <see cref="WaitUntilIdle"/>, this also waits on Direct3D 11, where Veldrid's idle wait returns at once.
+        /// </summary>
+        internal void WaitForGpu()
+        {
+            var colour = DefaultFramebuffer.ColorTargets[0].Target;
+
+            gpuWaitStaging ??= Factory.CreateTexture(TextureDescription.Texture2D(1, 1, 1, 1, colour.Format, TextureUsage.Staging));
+            gpuWaitCommands ??= Factory.CreateCommandList();
+            gpuWaitFence ??= Factory.CreateFence(false);
+
+            gpuWaitCommands.Begin();
+            gpuWaitCommands.CopyTexture(colour, 0, 0, 0, 0, 0, gpuWaitStaging, 0, 0, 0, 0, 0, 1, 1, 1, 1);
+            gpuWaitCommands.End();
+            Device.SubmitCommands(gpuWaitCommands, gpuWaitFence);
+
+            // Vulkan signals the fence when the GPU is done; Direct3D 11 signals it on submission, but blocks reading the copy until the GPU is done.
+            Device.WaitForFence(gpuWaitFence);
+            Device.ResetFence(gpuWaitFence);
+            Device.Map(gpuWaitStaging, MapMode.Read);
+            Device.Unmap(gpuWaitStaging);
+        }
+
         private Vector2I currentWindowSize;
 
         private readonly Direct3DPresentationMonitor? presentationMonitor;
@@ -201,6 +258,8 @@ namespace osu.Framework.Graphics.Veldrid
                 SwapchainDepthFormat = PixelFormat.R16UNorm,
                 SyncToVerticalBlank = true,
                 ResourceBindingModel = ResourceBindingModel.Improved,
+                // Opt-in for diagnosing drivers: enables validation layers (Vulkan) where they are installed or packaged with the app.
+                Debug = FrameworkFeatureFlags.VulkanValidation && graphicsSurface.Type == GraphicsSurfaceType.Vulkan,
             };
 
             var size = this.graphicsSurface.GetDrawableSize();
@@ -290,7 +349,8 @@ namespace osu.Framework.Graphics.Veldrid
                 case GraphicsSurfaceType.Vulkan:
                     Device = GraphicsDevice.CreateVulkan(options, swapchain, new VulkanDeviceOptions
                     {
-                        EnableWin32CaptureInterop = Environment.GetEnvironmentVariable("G0V0_VULKAN_CAPTURE_INTEROP") == "1"
+                        EnableWin32CaptureInterop = FrameworkFeatureFlags.VulkanCaptureInterop,
+                        EnableTextureDescriptorIndexing = FrameworkFeatureFlags.VulkanDescriptorIndexing || VeldridBindlessTextures.Requested
                     });
                     Device.LogVulkan(out maxTextureSize);
                     vulkanPresentationMonitor = new VulkanPresentationMonitor(Device.MainSwapchain);
@@ -406,7 +466,7 @@ namespace osu.Framework.Graphics.Veldrid
                 // OpenGL already provides a method for reading pixels directly from the active framebuffer, so let's just use that for now.
                 case GraphicsSurfaceType.OpenGL:
                 {
-                    var pixelData = SixLabors.ImageSharp.Configuration.Default.MemoryAllocator.Allocate<Rgba32>((int)(texture.Width * texture.Height));
+                    var pixelData = new osu.Framework.Allocation.PooledMemoryOwner<Rgba32>((int)(texture.Width * texture.Height));
 
                     var info = Device.GetOpenGLInfo();
 
@@ -417,12 +477,15 @@ namespace osu.Framework.Graphics.Veldrid
                     });
 
                     var glImage = Image.LoadPixelData(pixelData.Memory.Span, (int)texture.Width, (int)texture.Height);
-                    glImage.Mutate(i => i.Flip(FlipMode.Vertical));
+                    glImage.Mutate(i => i.FlipVertical());
                     return glImage;
                 }
 
                 default:
-                    return ExtractTexture<Bgra32>(texture, flipVertical: !Device.IsUvOriginTopLeft);
+                    // Swapchains are BGRA; offline framebuffers are RGBA.
+                    return texture.Format == PixelFormat.R8G8B8A8UNorm
+                        ? ExtractTexture<Rgba32>(texture, flipVertical: !Device.IsUvOriginTopLeft)
+                        : ExtractTexture<Bgra32>(texture, flipVertical: !Device.IsUvOriginTopLeft);
             }
         }
 
@@ -455,7 +518,7 @@ namespace osu.Framework.Graphics.Veldrid
             using var image = Image.LoadPixelData(span, (int)(resource.RowPitch / Marshal.SizeOf<TPixel>()), (int)height);
 
             if (flipVertical)
-                image.Mutate(i => i.Flip(FlipMode.Vertical));
+                image.Mutate(i => i.FlipVertical());
 
             // if the image width doesn't match the framebuffer, it means that we still have padding at the end of each row mentioned above to get rid of.
             // snip it to get a clean image.

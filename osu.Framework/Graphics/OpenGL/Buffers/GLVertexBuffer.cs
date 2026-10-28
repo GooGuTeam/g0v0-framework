@@ -1,14 +1,13 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Buffers;
-using osuTK.Graphics.ES30;
-using osu.Framework.Statistics;
 using osu.Framework.Development;
 using osu.Framework.Graphics.Rendering;
 using osu.Framework.Graphics.Rendering.Vertices;
-using SixLabors.ImageSharp.Memory;
+using osu.Framework.Statistics;
+using osuTK.Graphics.ES30;
 
 namespace osu.Framework.Graphics.OpenGL.Buffers
 {
@@ -49,6 +48,27 @@ namespace osu.Framework.Graphics.OpenGL.Buffers
             currentVertex = vertex;
 
             return isNewVertex;
+        }
+
+        /// <summary>
+        /// Writes consecutive vertices while extending the batch's pending synchronisation range.
+        /// </summary>
+        public void SetVertices(int vertexIndex, ReadOnlySpan<T> vertices, ref int changeBeginIndex, ref int changeEndIndex)
+        {
+            Span<T> destination = getMemory().Span.Slice(vertexIndex, vertices.Length);
+
+            for (int i = 0; i < vertices.Length; i++)
+            {
+                if (!destination[i].Equals(vertices[i]))
+                {
+                    if (changeBeginIndex == -1)
+                        changeBeginIndex = vertexIndex + i;
+
+                    changeEndIndex = vertexIndex + i + 1;
+                }
+
+                destination[i] = vertices[i];
+            }
         }
 
         /// <summary>
@@ -127,7 +147,7 @@ namespace osu.Framework.Graphics.OpenGL.Buffers
         public void DrawRange(int startIndex, int endIndex)
         {
             Bind(true);
-            Renderer.DrawVertices(Topology, ToElementIndex(startIndex), ToElements(endIndex - startIndex));
+            Renderer.DrawBatchVertices(Topology, ToElementIndex(startIndex), ToElements(endIndex - startIndex));
         }
 
         public void Update()
@@ -153,7 +173,7 @@ namespace osu.Framework.Graphics.OpenGL.Buffers
 
             if (!InUse)
             {
-                memoryOwner = SixLabors.ImageSharp.Configuration.Default.MemoryAllocator.Allocate<T>(Size, AllocationOptions.Clean);
+                memoryOwner = new osu.Framework.Allocation.PooledMemoryOwner<T>(Size, true);
                 vertexMemory = memoryOwner.Memory;
 
                 Renderer.RegisterVertexBufferUse(this);

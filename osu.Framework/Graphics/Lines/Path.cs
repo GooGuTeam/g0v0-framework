@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
@@ -12,6 +12,7 @@ using osu.Framework.Allocation;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using osu.Framework.Caching;
+using osu.Framework.Configuration;
 using osu.Framework.Extensions.EnumExtensions;
 using osu.Framework.Graphics.Rendering;
 using osu.Framework.Graphics.Shaders.Types;
@@ -22,8 +23,15 @@ namespace osu.Framework.Graphics.Lines
 {
     public partial class Path : Drawable, IBufferedDrawable
     {
+        /// <summary>
+        /// Whether paths that provide a <see cref="DirectGradient"/> are drawn straight into the current target as meshes, instead of through a framebuffer.
+        /// Experimental; enabled through the DirectPathRendering framework setting at startup.
+        /// </summary>
+        internal static bool DirectDrawingEnabled => FrameworkFeatureFlags.DirectPathRendering;
+
         public IShader TextureShader { get; private set; }
         private IShader pathShader;
+        private IShader directShader;
 
         [Resolved]
         private IRenderer renderer { get; set; }
@@ -38,7 +46,16 @@ namespace osu.Framework.Graphics.Lines
         {
             TextureShader = shaders.Load(VertexShaderDescriptor.TEXTURE_2, "Path");
             pathShader = shaders.Load("PathPrepass", "PathPrepass");
+
+            if (DirectDrawingEnabled)
+                directShader = shaders.Load("PathDirect", "Texture");
         }
+
+        /// <summary>
+        /// The colours across the path's width for drawing without a framebuffer, from the outermost point (first) to the centre (last).
+        /// Null always draws through the framebuffer. A new array must be assigned for each change, as draw nodes keep the previous one.
+        /// </summary>
+        private protected virtual Color4[] DirectGradient => null;
 
         private readonly List<Vector2> vertices = new List<Vector2>();
 
@@ -49,11 +66,35 @@ namespace osu.Framework.Graphics.Lines
             {
                 vertices.Clear();
                 vertices.AddRange(value);
+                drawRange = null;
 
                 vertexBoundsCache.Invalidate();
                 segmentsCache.Invalidate();
 
                 Invalidate(Invalidation.DrawSize);
+            }
+        }
+
+        private PathDrawRange? drawRange;
+
+        /// <summary>
+        /// Restricts rendering and hit testing without changing the full path or its bounding box.
+        /// Null draws the complete path. Changing vertices resets this range.
+        /// </summary>
+        public PathDrawRange? DrawRange
+        {
+            get => drawRange;
+            set
+            {
+                if (value is { } range && (range.FirstVertex < 0 || range.VertexCount < 0
+                    || range.FirstVertex > vertices.Count - range.VertexCount))
+                    throw new ArgumentOutOfRangeException(nameof(value));
+
+                if (drawRange == value)
+                    return;
+
+                drawRange = value;
+                Invalidate(Invalidation.DrawNode);
             }
         }
 
@@ -206,6 +247,21 @@ namespace osu.Framework.Graphics.Lines
             var localPos = ToLocalSpace(screenSpacePos);
             float pathRadiusSquared = PathRadius * PathRadius;
 
+            if (drawRange is { } range)
+            {
+                Vector2 offset = vertexBounds.TopLeft;
+                Vector2 previous = range.StartPoint - offset;
+                for (int i = range.FirstVertex; i < range.FirstVertex + range.VertexCount; i++)
+                {
+                    Vector2 next = vertices[i] - offset;
+                    if (new Line(previous, next).DistanceSquaredToPoint(localPos) <= pathRadiusSquared)
+                        return true;
+                    previous = next;
+                }
+
+                return new Line(previous, range.EndPoint - offset).DistanceSquaredToPoint(localPos) <= pathRadiusSquared;
+            }
+
             foreach (var t in segments)
             {
                 if (t.DistanceSquaredToPoint(localPos) <= pathRadiusSquared)
@@ -223,6 +279,7 @@ namespace osu.Framework.Graphics.Lines
                 return;
 
             vertices.Clear();
+            drawRange = null;
 
             vertexBoundsCache.Invalidate();
             segmentsCache.Invalidate();
@@ -233,6 +290,7 @@ namespace osu.Framework.Graphics.Lines
         public void AddVertex(Vector2 pos)
         {
             vertices.Add(pos);
+            drawRange = null;
 
             vertexBoundsCache.Invalidate();
             segmentsCache.Invalidate();
@@ -243,6 +301,7 @@ namespace osu.Framework.Graphics.Lines
         public void ReplaceVertex(int index, Vector2 pos)
         {
             vertices[index] = pos;
+            drawRange = null;
 
             vertexBoundsCache.Invalidate();
             segmentsCache.Invalidate();
@@ -252,6 +311,7 @@ namespace osu.Framework.Graphics.Lines
 
         private readonly List<Line> segmentsBacking = new List<Line>();
         private readonly Cached segmentsCache = new Cached();
+        private long segmentsVersion;
         private List<Line> segments => segmentsCache.IsValid ? segmentsBacking : generateSegments();
 
         private List<Line> generateSegments()
@@ -265,6 +325,7 @@ namespace osu.Framework.Graphics.Lines
                     segmentsBacking.Add(new Line(vertices[i] - offset, vertices[i + 1] - offset));
             }
 
+            segmentsVersion++;
             segmentsCache.Validate();
             return segmentsBacking;
         }
@@ -288,7 +349,20 @@ namespace osu.Framework.Graphics.Lines
 
         public DrawColourInfo? FrameBufferDrawColour => base.DrawColourInfo;
 
-        public Vector2 FrameBufferScale { get; } = Vector2.One;
+        private Vector2 frameBufferScale = Vector2.One;
+
+        public Vector2 FrameBufferScale
+        {
+            get => frameBufferScale;
+            set
+            {
+                if (frameBufferScale == value)
+                    return;
+
+                frameBufferScale = value;
+                Invalidate(Invalidation.DrawNode);
+            }
+        }
 
         // The path should not receive the true colour to avoid colour doubling when the frame-buffer is rendered to the back-buffer.
         public override DrawColourInfo DrawColourInfo => new DrawColourInfo(Color4.White, base.DrawColourInfo.Blending);
@@ -315,9 +389,28 @@ namespace osu.Framework.Graphics.Lines
             return result;
         }
 
-        private readonly BufferedDrawNodeSharedData sharedData = new BufferedDrawNodeSharedData(TexturePixelFormat.R16Float, clipToRootNode: true);
+        private TexturePixelFormat textureFormat = TexturePixelFormat.R8Float;
 
-        protected override DrawNode CreateDrawNode() => new PathBufferedDrawNode(this, new PathDrawNode(this), sharedData);
+        public TexturePixelFormat TextureFormat
+        {
+            get => textureFormat;
+            set
+            {
+                if (textureFormat == value)
+                    return;
+
+                textureFormat = value;
+                Invalidate(Invalidation.DrawNode);
+            }
+        }
+
+        private readonly BufferedDrawNodeSharedData sharedData = new BufferedDrawNodeSharedData(TexturePixelFormat.R8Float, clipToRootNode: true);
+
+        protected override DrawNode CreateDrawNode()
+        {
+            var buffered = new PathBufferedDrawNode(this, new PathDrawNode(this), sharedData);
+            return DirectDrawingEnabled ? new PathDirectDrawNode(this, buffered) : buffered;
+        }
 
         private class PathBufferedDrawNode : BufferedDrawNode
         {
@@ -338,6 +431,7 @@ namespace osu.Framework.Graphics.Lines
                 base.ApplyState();
                 pathInvalidationID = Source.PathInvalidationID;
                 texture = Source.Texture;
+                SharedData.TextureFormat = Source.TextureFormat;
 
                 var rect = texture.GetTextureRect();
                 textureRect = new Vector4(rect.Left, rect.Top, rect.Width, rect.Height);
@@ -364,6 +458,13 @@ namespace osu.Framework.Graphics.Lines
             }
 
             protected override long GetDrawVersion() => pathInvalidationID;
+
+            protected override void Dispose(bool isDisposing)
+            {
+                base.Dispose(isDisposing);
+
+                parametersBuffer?.Dispose();
+            }
         }
 
         protected override void Dispose(bool isDisposing)

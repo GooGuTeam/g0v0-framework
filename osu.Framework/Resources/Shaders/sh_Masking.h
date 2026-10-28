@@ -12,6 +12,31 @@ layout(location = 1) in lowp vec4 v_Colour;
 
 layout(location = 4) in mediump vec2 v_BlendRange;
 
+#ifdef G0V0_PER_VERTEX_MASKING
+
+// Defined when the vertex shader supplies these (see PerVertexMasking.cs). Masking parameters then come from the masking buffer
+// entry of the primitive instead of global uniforms, so that masking changes do not split batches.
+layout(location = 5) in highp float v_MaskingIndex;
+layout(location = 6) in highp vec2 v_ScissorPosition;
+
+// Only the index is kept. A local copy of the entry would make SPIR-V cross-compilation emit a second struct type for the
+// block (its bools become uints), which no longer matches the vertex stage's declaration when linking GLSL.
+int g0v0_MaskingEntry;
+
+#define g_IsMasking g0v0_Masking.Data[g0v0_MaskingEntry].IsMasking
+#define g_CornerRadius g0v0_Masking.Data[g0v0_MaskingEntry].CornerRadius
+#define g_CornerExponent g0v0_Masking.Data[g0v0_MaskingEntry].CornerExponent
+#define g_MaskingRect g0v0_Masking.Data[g0v0_MaskingEntry].MaskingRect
+#define g_BorderThickness g0v0_Masking.Data[g0v0_MaskingEntry].BorderThickness
+#define g_BorderColour g0v0_Masking.Data[g0v0_MaskingEntry].BorderColour
+#define g_MaskingBlendRange g0v0_Masking.Data[g0v0_MaskingEntry].MaskingBlendRange
+#define g_AlphaExponent g0v0_Masking.Data[g0v0_MaskingEntry].AlphaExponent
+#define g_EdgeOffset g0v0_Masking.Data[g0v0_MaskingEntry].EdgeOffset
+#define g_DiscardInner g0v0_Masking.Data[g0v0_MaskingEntry].DiscardInner
+#define g_InnerCornerRadius g0v0_Masking.Data[g0v0_MaskingEntry].InnerCornerRadius
+
+#endif // G0V0_PER_VERTEX_MASKING
+
 highp float distanceFromRoundedRect(highp vec2 offset, highp float radius)
 {
 	highp vec2 maskingPosition = v_MaskingPosition + offset;
@@ -33,6 +58,12 @@ highp float distanceFromRoundedRect(highp vec2 offset, highp float radius)
 	else
 	{
 		distanceFromShrunkRect = max(vec2(0.0), distanceFromShrunkRect);
+
+		// Circular corners (the default exponent) reduce to a Euclidean distance, avoiding three pow() calls per fragment.
+		// The branch depends only on a uniform, so it does not diverge.
+		if (g_CornerExponent == 2.0)
+			return length(distanceFromShrunkRect);
+
 		return pow(pow(distanceFromShrunkRect.x, g_CornerExponent) + pow(distanceFromShrunkRect.y, g_CornerExponent), 1.0 / g_CornerExponent);
 	}
 }
@@ -63,6 +94,17 @@ lowp vec4 getBorderColour()
 
 lowp vec4 getRoundedColor(lowp vec4 texel, mediump vec2 texCoord)
 {
+#ifdef G0V0_PER_VERTEX_MASKING
+	// All vertices of a primitive carry the same index, so interpolation leaves it intact up to rounding.
+	g0v0_MaskingEntry = int(v_MaskingIndex + 0.5);
+
+	// Clipping to the scissor happens here rather than in hardware, which is set to the whole viewport while per-vertex
+	// masking is in use. Pixel centres inside [left, right) x [top, bottom) are kept, as with a hardware scissor.
+	highp vec4 scissor = g0v0_Masking.Data[g0v0_MaskingEntry].ScissorRect;
+	if (v_ScissorPosition.x < scissor.x || v_ScissorPosition.y < scissor.y || v_ScissorPosition.x >= scissor.z || v_ScissorPosition.y >= scissor.w)
+		return vec4(0.0);
+#endif
+
 	if (!g_IsMasking && v_BlendRange == vec2(0.0))
 	{
 		return v_Colour * texel;
@@ -87,7 +129,12 @@ lowp vec4 getRoundedColor(lowp vec4 texel, mediump vec2 texCoord)
 		}
 
 		// We exponentiate our factor to exactly counteract the later exponentiation by g_AlphaExponent for a smoother inner border.
-		alphaFactor = pow(min(1.0 - innerBlendFactor, 1.0), 1.0 / g_AlphaExponent);
+		alphaFactor = min(1.0 - innerBlendFactor, 1.0);
+
+		if (g_AlphaExponent == 2.0)
+			alphaFactor = sqrt(alphaFactor);
+		else if (g_AlphaExponent != 1.0)
+			alphaFactor = pow(alphaFactor, 1.0 / g_AlphaExponent);
 	}
 
 	dist /= g_MaskingBlendRange;
@@ -108,7 +155,11 @@ lowp vec4 getRoundedColor(lowp vec4 texel, mediump vec2 texCoord)
 	}
 
 	// This ends up softening glow without negatively affecting edge smoothness much.
-	alphaFactor = pow(alphaFactor, g_AlphaExponent);
+	// Exponents of 1 (masking) and 2 (edge effects) are the only ones the framework sets; avoid pow() for both.
+	if (g_AlphaExponent == 2.0)
+		alphaFactor *= alphaFactor;
+	else if (g_AlphaExponent != 1.0)
+		alphaFactor = pow(alphaFactor, g_AlphaExponent);
 
 	highp float borderStart = 1.0 + fadeStart - g_BorderThickness;
 	lowp float colourWeight = min(borderStart - dist, 1.0);

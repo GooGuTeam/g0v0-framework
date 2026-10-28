@@ -99,9 +99,9 @@ namespace osu.Framework.Graphics.Video
                 var command = await nextCommandAsync(token).ConfigureAwait(false);
                 if (command.Count > 3 && command[0] is string name && name == @"onStatus" && command[3] is Dictionary<string, object?> status)
                 {
-                    if (status.TryGetValue(@"code", out var code) && code is @"NetStream.Publish.Start")
+                    if (status.TryGetValue(@"code", out object? code) && code is @"NetStream.Publish.Start")
                         break;
-                    if (status.TryGetValue(@"level", out var level) && level is @"error")
+                    if (status.TryGetValue(@"level", out object? level) && level is @"error")
                         throw new IOException(@"The server rejected the publishing request.");
                 }
             }
@@ -116,7 +116,7 @@ namespace osu.Framework.Graphics.Video
             {
                 var command = await nextCommandAsync(token).ConfigureAwait(false);
                 if (command.Count > 3 && command[3] is Dictionary<string, object?> status
-                    && status.TryGetValue(@"level", out var level) && level is @"error")
+                    && status.TryGetValue(@"level", out object? level) && level is @"error")
                     throw new IOException(@"The publishing session was rejected by the server.");
             }
         }
@@ -304,7 +304,7 @@ namespace osu.Framework.Graphics.Video
         private Task sendCommandAsync(uint id, CancellationToken token, params object?[] values)
         {
             using var output = new MemoryStream();
-            foreach (var value in values) writeAmf(output, value);
+            foreach (object? value in values) writeAmf(output, value);
             return sendAsync(20, id, 0, output.ToArray(), token);
         }
 

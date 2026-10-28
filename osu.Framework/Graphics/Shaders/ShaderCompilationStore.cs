@@ -1,9 +1,10 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Text;
 using System.Threading;
 using Newtonsoft.Json;
 using osu.Framework.Extensions;
@@ -11,6 +12,7 @@ using osu.Framework.Logging;
 using osu.Framework.Platform;
 using Veldrid;
 using Veldrid.SPIRV;
+using Vortice.D3DCompiler;
 
 namespace osu.Framework.Graphics.Shaders
 {
@@ -78,6 +80,108 @@ namespace osu.Framework.Graphics.Shaders
             saveToCache(filename, compilation);
 
             return compilation;
+        }
+
+        /// <summary>
+        /// Bumped when the bytecode compiler or its options change.
+        /// </summary>
+        private const int bytecode_cache_version = 1;
+
+        /// <summary>
+        /// Compiles HLSL to Direct3D bytecode (DXBC), persisting the result.
+        /// <para>
+        /// Without this, Veldrid compiles HLSL text with D3DCompile every time a shader is created on the draw thread.
+        /// The call mirrors Veldrid's (source bytes, entry point, profile, <see cref="ShaderFlags.OptimizationLevel3"/>), so the
+        /// bytecode is the same as Veldrid would produce, and Veldrid uses it directly.
+        /// </para>
+        /// </summary>
+        /// <param name="hlsl">The cross-compiled HLSL source.</param>
+        /// <param name="entryPoint">The entry point.</param>
+        /// <param name="profile">The shader model profile, e.g. <c>vs_5_0</c>.</param>
+        public byte[] CompileHlslBytecode(string hlsl, string entryPoint, string profile)
+        {
+            string filename = $"{hlsl.ComputeMD5Hash()}#{entryPoint}#{profile}#dxbc#{bytecode_cache_version}";
+
+            if (TryGetCachedBinary(filename, out byte[]? cached))
+                return cached;
+
+            Compiler.Compile(Encoding.UTF8.GetBytes(hlsl), null!, null!, entryPoint, null!, profile, ShaderFlags.OptimizationLevel3, out var result, out var error);
+
+            if (result == null)
+                throw new InvalidOperationException($"Failed to compile HLSL code: {Encoding.ASCII.GetString(error.AsBytes())}");
+
+            byte[] bytecode = result.AsBytes();
+            result.Dispose();
+            error?.Dispose();
+
+            SaveBinary(filename, bytecode);
+            return bytecode;
+        }
+
+        internal bool TryGetCachedBinary(string filename, [NotNullWhen(true)] out byte[]? bytes)
+        {
+            bytes = null;
+
+            try
+            {
+                if (CacheStorage == null)
+                    return false;
+
+                string checksum;
+                byte[] data;
+
+                lock (save_lock)
+                {
+                    if (!CacheStorage.Exists(filename))
+                        return false;
+
+                    using var stream = CacheStorage.GetStream(filename);
+                    using var br = new BinaryReader(stream);
+
+                    checksum = br.ReadString();
+                    data = br.ReadBytes(br.ReadInt32());
+                }
+
+                if (Convert.ToHexString(System.Security.Cryptography.MD5.HashData(data)) != checksum)
+                {
+                    Logger.Log("Cached shader bytecode is corrupted - recompiling.");
+                    return false;
+                }
+
+                bytes = data;
+                return true;
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, "Failed to read cached shader bytecode - recompiling.");
+            }
+
+            return false;
+        }
+
+        internal void SaveBinary(string filename, byte[] bytes)
+        {
+            lock (save_lock)
+            {
+                if (CacheStorage == null)
+                    return;
+
+                try
+                {
+                    CacheStorage.Delete(filename);
+
+                    using var stream = CacheStorage.CreateFileSafely(filename);
+                    using var bw = new BinaryWriter(stream);
+
+                    bw.Write(Convert.ToHexString(System.Security.Cryptography.MD5.HashData(bytes)));
+                    bw.Write(bytes.Length);
+                    bw.Write(bytes);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "Failed to save shader bytecode to cache.");
+                }
+            }
         }
 
         private bool tryGetCached<T>(string filename, [NotNullWhen(true)] out T? compilation)

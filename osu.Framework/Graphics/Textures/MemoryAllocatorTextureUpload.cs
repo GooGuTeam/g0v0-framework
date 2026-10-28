@@ -1,13 +1,12 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
 using System;
 using System.Buffers;
 using osu.Framework.Graphics.Primitives;
-using SixLabors.ImageSharp.Memory;
-using SixLabors.ImageSharp.PixelFormats;
+using osu.Framework.Imaging;
 
 namespace osu.Framework.Graphics.Textures
 {
@@ -28,10 +27,9 @@ namespace osu.Framework.Graphics.Textures
         /// </summary>
         /// <param name="width">The width of the texture.</param>
         /// <param name="height">The height of the texture.</param>
-        /// <param name="memoryAllocator">The source to retrieve memory from. Shared default is used if null.</param>
-        public MemoryAllocatorTextureUpload(int width, int height, MemoryAllocator memoryAllocator = null)
+        public MemoryAllocatorTextureUpload(int width, int height)
         {
-            memoryOwner = (memoryAllocator ?? SixLabors.ImageSharp.Configuration.Default.MemoryAllocator).Allocate<Rgba32>(width * height);
+            memoryOwner = new osu.Framework.Allocation.PooledMemoryOwner<Rgba32>(Image<Rgba32>.ValidateDimensions(width, height), clear: true);
         }
 
         #region IDisposable Support

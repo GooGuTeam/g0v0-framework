@@ -1,21 +1,21 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
+using System.Threading;
 using osu.Framework.Development;
 using osu.Framework.Extensions.ImageExtensions;
 using osu.Framework.Graphics.Primitives;
 using osu.Framework.Graphics.Rendering;
 using osu.Framework.Graphics.Textures;
+using osu.Framework.Imaging;
 using osu.Framework.Logging;
 using osu.Framework.Platform;
 using osuTK.Graphics;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
 using Veldrid;
 using PixelFormat = Veldrid.PixelFormat;
 using Texture = Veldrid.Texture;
@@ -25,6 +25,9 @@ namespace osu.Framework.Graphics.Veldrid.Textures
     internal class VeldridTexture : IVeldridTexture
     {
         private readonly Queue<ITextureUpload> uploadQueue = new Queue<ITextureUpload>();
+
+        // Published under the queue lock so empty checks never read Queue.Count without synchronisation.
+        private int pendingUploadCount;
 
         IRenderer INativeTexture.Renderer => Renderer;
         TextureFilteringMode INativeTexture.FilteringMode => filteringMode;
@@ -45,16 +48,16 @@ namespace osu.Framework.Graphics.Veldrid.Textures
 
         public virtual int Width { get; set; }
         public virtual int Height { get; set; }
-        public virtual int GetByteSize() => Width * Height * 4;
+        public virtual int GetByteSize() => Width * Height * (pixelFormat == TexturePixelFormat.R8Float ? 1 : 4);
         public bool Available { get; private set; } = true;
+
+        internal ITextureUpload CreateEmptyUpload() => new TextureUpload(pixelFormat);
 
         ulong INativeTexture.TotalBindCount { get; set; }
 
         public bool BypassTextureUploadQueueing { get; set; }
 
         private readonly bool manualMipmaps;
-
-        private readonly List<RectangleI> uploadedRegions = new List<RectangleI>();
 
         private readonly SamplerFilter nativeFilteringMode;
         private readonly TextureFilteringMode filteringMode;
@@ -138,6 +141,9 @@ namespace osu.Framework.Graphics.Veldrid.Textures
                 texture.resources?.Dispose();
                 texture.resources = null;
 
+                texture.bindlessView?.Dispose();
+                texture.bindlessView = null;
+
                 texture.Available = false;
             }, this);
         }
@@ -180,6 +186,33 @@ namespace osu.Framework.Graphics.Veldrid.Textures
             set => resourcesArray[0] = value;
         }
 
+        private TextureView? bindlessView;
+
+        /// <summary>
+        /// A view of this texture limited to the mip levels its own sampler would use, for bindless texture tables, which share samplers.
+        /// </summary>
+        internal TextureView? GetBindlessView()
+        {
+            var texture = resources?.Texture;
+
+            if (texture == null)
+                return null;
+
+            bool useUploadMipmaps = manualMipmaps || maximumUploadedLod > 0;
+            uint baseLevel = (uint)(MipLevel ?? 0);
+            uint levels = MipLevel != null ? 1 : Math.Min(texture.MipLevels, (uint)(useUploadMipmaps ? maximumUploadedLod : IRenderer.MAX_MIPMAP_LEVELS) + 1);
+
+            if (bindlessView != null && bindlessView.Target == texture && bindlessView.BaseMipLevel == baseLevel && bindlessView.MipLevels == levels)
+                return bindlessView;
+
+            if (bindlessView != null)
+                Renderer.ScheduleDisposal(static view => view.Dispose(), bindlessView);
+
+            return bindlessView = Renderer.Factory.CreateTextureView(new TextureViewDescription(texture, baseLevel, levels, 0, 1));
+        }
+
+        internal bool UsesNearestFiltering => nativeFilteringMode == SamplerFilter.MinPointMagPointMipPoint;
+
         public virtual IReadOnlyList<VeldridTextureResources> GetResourceList()
         {
             if (resources == null)
@@ -203,6 +236,7 @@ namespace osu.Framework.Graphics.Veldrid.Textures
 
                 bool requireUpload = uploadQueue.Count == 0;
                 uploadQueue.Enqueue(upload);
+                Volatile.Write(ref pendingUploadCount, uploadQueue.Count);
 
                 if (requireUpload && !BypassTextureUploadQueueing)
                     Renderer.EnqueueTextureUpload(this);
@@ -217,172 +251,67 @@ namespace osu.Framework.Graphics.Veldrid.Textures
             // We should never run raw Veldrid calls on another thread than the draw thread due to race conditions.
             ThreadSafety.EnsureDrawThread();
 
-            uploadedRegions.Clear();
+            bool uploaded = false;
 
             while (tryGetNextUpload(out ITextureUpload? upload))
             {
                 using (upload)
                 {
-                    DoUpload(upload);
+                    ITextureUpload effectiveUpload = upload;
+                    IDisposable? convertedDisposable = null;
 
-                    uploadedRegions.Add(upload.Bounds);
+                    if (upload is AlphaTextureUpload alpha && pixelFormat == TexturePixelFormat.R8G8B8A8Float)
+                    {
+                        var converted = alpha.ToRgbaUpload();
+                        effectiveUpload = converted;
+                        convertedDisposable = converted;
+                    }
+
+                    try
+                    {
+                        if (effectiveUpload.Format != pixelFormat)
+                            throw new InvalidOperationException($"Texture upload format {effectiveUpload.Format} does not match texture format {pixelFormat}.");
+
+                        Texture? previousTexture = resources?.Texture;
+
+                        DoUpload(effectiveUpload);
+
+                        uploaded = true;
+
+                        // Only level-0 data uploaded into an existing texture can be followed by regional regeneration.
+                        if (resources?.Texture != previousTexture || effectiveUpload.Level != 0)
+                            requiresFullMipmaps = true;
+                        else if (!effectiveUpload.RawData.IsEmpty)
+                            uploadedRegions.Add(effectiveUpload.Bounds);
+                    }
+                    finally
+                    {
+                        convertedDisposable?.Dispose();
+                    }
                 }
             }
 
-            #region Custom mipmap generation (disabled)
-
-            // Generate mipmaps for just the updated regions of the texture.
-            // This implementation is functionally equivalent to CommandList.GenerateMipmaps(),
-            // only that it is much more efficient if only small parts of the texture
-            // have been updated.
-
-            // The implementation has been tried in a release, but the user reception has been mixed
-            // due to various issues on various platforms (most prominently android).
-            // As it's difficult to ascertain a reasonable heuristic as to when it should be safe to use this implementation,
-            // for now it is unconditionally disabled, and it can be revisited at a later date.
-
-            // if (uploadedRegions.Count != 0 && !manualMipmaps)
-            // {
-            //     // Merge overlapping upload regions to prevent redundant mipmap generation.
-            //     // i goes through the list left-to-right, j goes through it right-to-left
-            //     // until both indices meet somewhere in the middle.
-            //     // This algorithm needs multiple passes until no possible merges are found.
-            //     bool mergeFound;
-
-            //     do
-            //     {
-            //         mergeFound = false;
-
-            //         for (int i = 0; i < uploadedRegions.Count; ++i)
-            //         {
-            //             RectangleI toMerge = uploadedRegions[i];
-
-            //             for (int j = uploadedRegions.Count - 1; j > i; --j)
-            //             {
-            //                 RectangleI mergeCandidate = uploadedRegions[j];
-
-            //                 if (!toMerge.Intersect(mergeCandidate).IsEmpty)
-            //                 {
-            //                     uploadedRegions[i] = toMerge = RectangleI.Union(toMerge, mergeCandidate);
-            //                     uploadedRegions.RemoveAt(j);
-            //                     mergeFound = true;
-            //                 }
-            //             }
-            //         }
-            //     } while (mergeFound);
-
-            //     // Mipmap generation using the merged upload regions follows
-            //     BlendingParameters previousBlendingParameters = Renderer.CurrentBlendingParameters;
-
-            //     // Use a simple render state (no blending, masking, scissoring, stenciling, etc.)
-            //     Renderer.SetBlend(BlendingParameters.None);
-            //     Renderer.PushDepthInfo(new DepthInfo(false, false));
-            //     Renderer.PushStencilInfo(new StencilInfo(false));
-            //     Renderer.PushScissorState(false);
-
-            //     // Create render state for mipmap generation
-            //     Renderer.BindTexture(this);
-            //     Renderer.GetMipmapShader().Bind();
-
-            //     using var samplingTexture = Renderer.Factory.CreateTexture(TextureDescription.Texture2D((uint)Width, (uint)Height, resources!.Texture.MipLevels, 1, resources!.Texture.Format, TextureUsage.Sampled));
-            //     using var samplingResources = new VeldridTextureResources(samplingTexture, null);
-
-            //     while (uploadedRegions.Count > 0)
-            //     {
-            //         int width = Width;
-            //         int height = Height;
-
-            //         int count = Math.Min(uploadedRegions.Count, IRenderer.MAX_QUADS);
-
-            //         // Generate quad buffer that will hold all the updated regions
-            //         var quadBuffer = new VeldridQuadBuffer<UncolouredVertex2D>(Renderer, count, BufferUsage.Dynamic);
-
-            //         // Compute mipmap by iteratively blitting coarser and coarser versions of the updated regions
-            //         for (int level = 1; level < IRenderer.MAX_MIPMAP_LEVELS + 1 && (width > 1 || height > 1); ++level)
-            //         {
-            //             width /= 2;
-            //             height /= 2;
-
-            //             // Fill quad buffer with downscaled (and conservatively rounded) draw rectangles
-            //             for (int i = 0; i < count; ++i)
-            //             {
-            //                 // Conservatively round the draw rectangles. Rounding to integer coords is required
-            //                 // in order to ensure all the texels affected by linear interpolation are touched.
-            //                 // We could skip the rounding & use a single vertex buffer for all levels if we had
-            //                 // conservative raster, but alas, that's only supported on NV and Intel.
-            //                 Vector2I topLeft = uploadedRegions[i].TopLeft;
-            //                 topLeft = new Vector2I(topLeft.X / 2, topLeft.Y / 2);
-            //                 Vector2I bottomRight = uploadedRegions[i].BottomRight;
-            //                 bottomRight = new Vector2I(MathUtils.DivideRoundUp(bottomRight.X, 2), MathUtils.DivideRoundUp(bottomRight.Y, 2));
-            //                 uploadedRegions[i] = new RectangleI(topLeft.X, topLeft.Y, bottomRight.X - topLeft.X, bottomRight.Y - topLeft.Y);
-
-            //                 // Normalize the draw rectangle into the unit square, which doubles as texture sampler coordinates.
-            //                 RectangleF r = (RectangleF)uploadedRegions[i] / new Vector2(width, height);
-
-            //                 quadBuffer.SetVertex(i * 4 + 0, new UncolouredVertex2D { Position = r.BottomLeft });
-            //                 quadBuffer.SetVertex(i * 4 + 1, new UncolouredVertex2D { Position = r.BottomRight });
-            //                 quadBuffer.SetVertex(i * 4 + 2, new UncolouredVertex2D { Position = r.TopRight });
-            //                 quadBuffer.SetVertex(i * 4 + 3, new UncolouredVertex2D { Position = r.TopLeft });
-            //             }
-
-            //             // this intentionally runs a CopyTexture command on the render pass command list as it has to be executed after the previous level is rendered by the GPU.
-            //             Renderer.Commands.CopyTexture(resources!.Texture, samplingTexture, (uint)level - 1, 0);
-
-            //             // Read the texture from 1 mip level higher...
-            //             samplingResources.Sampler = Renderer.Factory.CreateSampler(new SamplerDescription
-            //             {
-            //                 AddressModeU = SamplerAddressMode.Clamp,
-            //                 AddressModeV = SamplerAddressMode.Clamp,
-            //                 AddressModeW = SamplerAddressMode.Clamp,
-            //                 Filter = filteringMode,
-            //                 MinimumLod = (uint)level - 1,
-            //                 MaximumLod = (uint)level - 1,
-            //                 MaximumAnisotropy = 0,
-            //             });
-
-            //             Renderer.BindTextureResource(samplingResources, 0);
-
-            //             // ...than the one we're writing to via frame buffer.
-            //             using (var frameBuffer = new VeldridFrameBuffer(Renderer, this, level))
-            //             {
-            //                 Renderer.BindFrameBuffer(frameBuffer);
-            //                 Renderer.PushViewport(new RectangleI(0, 0, width, height));
-
-            //                 // Perform the actual mip level draw
-            //                 quadBuffer.Update();
-            //                 quadBuffer.Draw();
-
-            //                 Renderer.PopViewport();
-            //                 Renderer.UnbindFrameBuffer(frameBuffer);
-            //             }
-            //         }
-
-            //         uploadedRegions.RemoveRange(0, count);
-            //     }
-
-            //     // Restore previous render state
-            //     Renderer.GetMipmapShader().Unbind();
-
-            //     Renderer.PopScissorState();
-            //     Renderer.PopStencilInfo();
-            //     Renderer.PopDepthInfo();
-
-            //     Renderer.SetBlend(previousBlendingParameters);
-            // }
-
-            #endregion
-
-            #region Veldrid-provided mipmap generation
-
-            if (uploadedRegions.Count != 0 && !manualMipmaps)
+            if (uploaded && !manualMipmaps)
             {
                 Debug.Assert(resources != null);
-                Renderer.GenerateMipmaps(this);
+
+                if (canGenerateRegionMipmaps && MipmapRegions.TryPlan(uploadedRegions, Width, Height, mipmapRegions))
+                {
+                    foreach (var region in mipmapRegions)
+                        Renderer.GenerateMipmaps(this, region);
+
+                    RegionMipmapGenerations += mipmapRegions.Count;
+                }
+                else
+                {
+                    Renderer.GenerateMipmaps(this);
+                    requiresFullMipmaps = false;
+                }
             }
 
-            #endregion
+            uploadedRegions.Clear();
 
-            return uploadedRegions.Count != 0;
+            return uploaded;
         }
 
         public bool UploadComplete
@@ -401,6 +330,13 @@ namespace osu.Framework.Graphics.Veldrid.Textures
 
         private bool tryGetNextUpload([NotNullWhen(true)] out ITextureUpload? upload)
         {
+            // Recheck on every call: atlas uploads may arrive between two glyph draws in the same frame.
+            if (Volatile.Read(ref pendingUploadCount) == 0)
+            {
+                upload = null;
+                return false;
+            }
+
             lock (uploadQueue)
             {
                 if (uploadQueue.Count == 0)
@@ -410,6 +346,7 @@ namespace osu.Framework.Graphics.Veldrid.Textures
                 }
 
                 upload = uploadQueue.Dequeue();
+                Volatile.Write(ref pendingUploadCount, uploadQueue.Count);
                 return true;
             }
         }
@@ -437,6 +374,53 @@ namespace osu.Framework.Graphics.Veldrid.Textures
         /// This excludes automatic generation of mipmaps via the graphics backend.
         /// </remarks>
         private int maximumUploadedLod;
+
+        private readonly List<RectangleI> uploadedRegions = new List<RectangleI>();
+        private readonly List<RectangleI> mipmapRegions = new List<RectangleI>();
+
+        /// <summary>
+        /// Whether levels 1 and above have not yet been fully generated from the current level 0. Regional regeneration
+        /// relies on a whole-texture generation having initialised every level first.
+        /// </summary>
+        private bool requiresFullMipmaps = true;
+
+        /// <summary>
+        /// The number of regional mipmap generations performed, for diagnostics and tests.
+        /// </summary>
+        internal int RegionMipmapGenerations { get; private set; }
+
+        private bool canGenerateRegionMipmaps
+            => !requiresFullMipmaps
+               && MipmapRegions.SupportsFormat(pixelFormat)
+               && resources is { Texture.MipLevels: > IRenderer.MAX_MIPMAP_LEVELS }
+               && GetResourceList().Count == 1;
+
+        /// <summary>
+        /// Regenerates mipmap levels 1 to <see cref="IRenderer.MAX_MIPMAP_LEVELS"/> for an aligned region of a texture.
+        /// The region is copied into a small scratch texture, which the backend generates mipmaps for, and the resulting
+        /// levels are copied back. Only copies and the backend's own mipmap generation are used.
+        /// </summary>
+        internal static void GenerateRegionMipmaps(IVeldridRenderer renderer, CommandList commands, VeldridTexture texture, RectangleI region)
+        {
+            MipmapRegions.ThrowIfMisaligned(region);
+
+            Texture target = texture.GetResourceList()[0].Texture;
+
+            var description = TextureDescription.Texture2D((uint)region.Width, (uint)region.Height, IRenderer.MAX_MIPMAP_LEVELS + 1, 1, target.Format,
+                TextureUsage.Sampled | TextureUsage.RenderTarget | TextureUsage.GenerateMipmaps);
+            Texture scratch = renderer.Factory.CreateTexture(ref description);
+
+            commands.CopyTexture(target, (uint)region.X, (uint)region.Y, 0, 0, 0, scratch, 0, 0, 0, 0, 0, (uint)region.Width, (uint)region.Height, 1, 1);
+            commands.GenerateMipmaps(scratch);
+
+            for (int level = 1; level <= IRenderer.MAX_MIPMAP_LEVELS; level++)
+            {
+                commands.CopyTexture(scratch, 0, 0, 0, (uint)level, 0, target, (uint)(region.X >> level), (uint)(region.Y >> level), 0, (uint)level, 0,
+                    (uint)(region.Width >> level), (uint)(region.Height >> level), 1, 1);
+            }
+
+            renderer.ScheduleDisposal(static t => t.Dispose(), scratch);
+        }
 
         private Sampler createSampler()
         {
@@ -479,7 +463,7 @@ namespace osu.Framework.Graphics.Veldrid.Textures
 
             int lastMaximumUploadedLod = maximumUploadedLod;
 
-            if (!upload.Data.IsEmpty)
+            if (!upload.RawData.IsEmpty)
             {
                 // ensure all mip levels up to the target level are initialised.
                 // generally we always upload at level 0, so this won't run.
@@ -491,8 +475,13 @@ namespace osu.Framework.Graphics.Veldrid.Textures
                     maximumUploadedLod = upload.Level;
                 }
 
-                Renderer.UpdateTexture(texture, upload.Bounds.X >> upload.Level, upload.Bounds.Y >> upload.Level, upload.Bounds.Width >> upload.Level, upload.Bounds.Height >> upload.Level,
-                    upload.Level, upload.Data);
+                unsafe
+                {
+                    fixed (byte* data = upload.RawData)
+                        Renderer.UpdateTexture(texture, upload.Bounds.X >> upload.Level, upload.Bounds.Y >> upload.Level,
+                            upload.Bounds.Width >> upload.Level, upload.Bounds.Height >> upload.Level, upload.Level, (IntPtr)data,
+                            upload.Bounds.Width * (pixelFormat == TexturePixelFormat.R8Float ? 1 : 4));
+                }
             }
 
             if (sampler == null || maximumUploadedLod > lastMaximumUploadedLod)
@@ -510,6 +499,26 @@ namespace osu.Framework.Graphics.Veldrid.Textures
         {
             if (initialisationColour == null)
                 return;
+
+            if (pixelFormat == TexturePixelFormat.R8Float)
+            {
+                byte[] coverage = new byte[checked(width * height)];
+                Array.Fill(coverage, (byte)Math.Clamp((int)MathF.Round(initialisationColour.Value.R * 255), 0, 255));
+                updateMemoryUsage(level, coverage.Length);
+                fixed (byte* data = coverage)
+                    Renderer.UpdateTexture(texture, 0, 0, width, height, level, (IntPtr)data, width);
+                return;
+            }
+
+            if (pixelFormat == TexturePixelFormat.R8Float)
+            {
+                byte[] coverage = new byte[checked(width * height)];
+                Array.Fill(coverage, (byte)Math.Clamp((int)MathF.Round(initialisationColour.Value.R * 255), 0, 255));
+                updateMemoryUsage(level, coverage.Length);
+                fixed (byte* data = coverage)
+                    Renderer.UpdateTexture(texture, 0, 0, width, height, level, (IntPtr)data, width);
+                return;
+            }
 
             var rgbaColour = new Rgba32(new Vector4(initialisationColour.Value.R, initialisationColour.Value.G, initialisationColour.Value.B, initialisationColour.Value.A));
 

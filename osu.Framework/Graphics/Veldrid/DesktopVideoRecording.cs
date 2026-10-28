@@ -102,7 +102,7 @@ namespace osu.Framework.Graphics.Veldrid
                     {
                         recording.vulkanInfo = recording.session.Device.GetVulkanInfo();
                         if (!recording.vulkanInfo.Win32CaptureInteropEnabled)
-                            throw new NotSupportedException("Enable G0V0_VULKAN_CAPTURE_INTEROP before starting the client.");
+                            throw new NotSupportedException(@"Enable Vulkan capture interop in Settings > Flags... and restart the game.");
                     }
                     else
                     {
@@ -162,7 +162,7 @@ namespace osu.Framework.Graphics.Veldrid
         {
             IntPtr recorder = IntPtr.Zero;
             Exception? failure = null;
-            float[] audio = new float[2048 * MixerAudioCapture.Channels];
+            float[] audio = new float[2048 * MixerAudioCapture.CHANNELS];
             MixerAudioCapture? capture = null;
             long videoEndSample = 0;
             uint recordingWidth = 0, recordingHeight = 0;
@@ -173,8 +173,8 @@ namespace osu.Framework.Graphics.Veldrid
                 {
                     if (recorder != IntPtr.Zero)
                     {
-                        long readySample = (long)((Stopwatch.GetTimestamp() - start) * (double)MixerAudioCapture.SampleRate / Stopwatch.Frequency)
-                                           - MixerAudioCapture.SampleRate / 10;
+                        long readySample = (long)((Stopwatch.GetTimestamp() - start) * (double)MixerAudioCapture.SAMPLE_RATE / Stopwatch.Frequency)
+                                           - MixerAudioCapture.SAMPLE_RATE / 10;
                         writeAudioUntil(recorder, capture, audio, Math.Min(videoEndSample, readySample));
                     }
                     if (!frames.TryTake(out var frame, 20))
@@ -193,20 +193,20 @@ namespace osu.Framework.Graphics.Veldrid
                                     throw new NotSupportedException("Vulkan recording currently requires BGRA8 UNORM.");
                                 if (packetReceiver != null)
                                     Marshal.ThrowExceptionForHR(g0_vk_stream_open_configured(vulkanInfo!.Instance, vulkanInfo.PhysicalDevice, vulkanInfo.Device,
-                                        vulkanInfo.GraphicsQueueFamilyIndex, frame.Texture.Width, frame.Texture.Height, MixerAudioCapture.SampleRate, MixerAudioCapture.Channels,
+                                        vulkanInfo.GraphicsQueueFamilyIndex, frame.Texture.Width, frame.Texture.Height, MixerAudioCapture.SAMPLE_RATE, MixerAudioCapture.CHANNELS,
                                         (uint)options.FrameRate, (uint)options.Bitrate, (uint)options.H264Profile,
                                         (uint)options.Width, (uint)options.Height, packetCallback, IntPtr.Zero, out recorder));
                                 else
                                     Marshal.ThrowExceptionForHR(g0_vk_open_configured(vulkanInfo!.Instance, vulkanInfo.PhysicalDevice, vulkanInfo.Device,
-                                        vulkanInfo.GraphicsQueueFamilyIndex, frame.Texture.Width, frame.Texture.Height, path, MixerAudioCapture.SampleRate, MixerAudioCapture.Channels,
+                                        vulkanInfo.GraphicsQueueFamilyIndex, frame.Texture.Width, frame.Texture.Height, path, MixerAudioCapture.SAMPLE_RATE, MixerAudioCapture.CHANNELS,
                                         (uint)options.FrameRate, (uint)options.Bitrate, (uint)options.H264Profile, (uint)options.Width, (uint)options.Height, out recorder));
                             }
                             else if (packetReceiver != null)
                                 Marshal.ThrowExceptionForHR(g0_stream_open_configured(device, (uint)options.Width, (uint)options.Height,
-                                    MixerAudioCapture.SampleRate, MixerAudioCapture.Channels, (uint)options.FrameRate, (uint)options.Bitrate, (uint)options.H264Profile, packetCallback, IntPtr.Zero, out recorder));
+                                    MixerAudioCapture.SAMPLE_RATE, MixerAudioCapture.CHANNELS, (uint)options.FrameRate, (uint)options.Bitrate, (uint)options.H264Profile, packetCallback, IntPtr.Zero, out recorder));
                             else
                                 Marshal.ThrowExceptionForHR(g0_record_open_configured(device, path, (uint)options.Width, (uint)options.Height,
-                                    MixerAudioCapture.SampleRate, MixerAudioCapture.Channels, (uint)options.FrameRate, (uint)options.Bitrate, (uint)options.H264Profile, out recorder));
+                                    MixerAudioCapture.SAMPLE_RATE, MixerAudioCapture.CHANNELS, (uint)options.FrameRate, (uint)options.Bitrate, (uint)options.H264Profile, out recorder));
                         }
                         if (packetFailure != null)
                             throw new InvalidOperationException(@"The encoded packet receiver failed.", packetFailure);
@@ -232,7 +232,7 @@ namespace osu.Framework.Graphics.Veldrid
                         else
                             Marshal.ThrowExceptionForHR(g0_record_frame(recorder, session.Device.GetD3D11Info().GetTexturePointer(frame.Texture), timestamp));
                         started.TrySetResult();
-                        videoEndSample = (long)((timestamp / 10000000.0 + 1.0 / options.FrameRate) * MixerAudioCapture.SampleRate);
+                        videoEndSample = (long)((timestamp / 10000000.0 + 1.0 / options.FrameRate) * MixerAudioCapture.SAMPLE_RATE);
                     }
                     finally
                     {
@@ -322,7 +322,7 @@ namespace osu.Framework.Graphics.Veldrid
         {
             while (capture.Position < endSample)
             {
-                int count = (int)Math.Min(buffer.Length / MixerAudioCapture.Channels, endSample - capture.Position);
+                int count = (int)Math.Min(buffer.Length / MixerAudioCapture.CHANNELS, endSample - capture.Position);
                 long position = capture.Position;
                 capture.Read(buffer, count);
                 Marshal.ThrowExceptionForHR(vulkan

@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Diagnostics;
@@ -10,7 +10,6 @@ using osu.Framework.Extensions;
 using osu.Framework.Graphics.Sprites;
 using osu.Framework.IO.Stores;
 using osu.Framework.Testing;
-using SixLabors.ImageSharp.Memory;
 
 namespace osu.Framework.Benchmarks
 {
@@ -21,7 +20,6 @@ namespace osu.Framework.Benchmarks
 
         public override void SetUp()
         {
-            SixLabors.ImageSharp.Configuration.Default.MemoryAllocator = MemoryAllocator.Default;
 
             baseResources = new NamespacedResourceStore<byte[]>(new DllResourceStore(@"osu.Framework.dll"), @"Resources");
             sharedTemp = new TemporaryNativeStorage("fontstore-test-" + Guid.NewGuid());
@@ -72,7 +70,6 @@ namespace osu.Framework.Benchmarks
         [Benchmark]
         public void BenchmarkTimedExpiry()
         {
-            SixLabors.ImageSharp.Configuration.Default.MemoryAllocator = MemoryAllocator.Default;
 
             using (var store = new TimedExpiryGlyphStore(baseResources, font_name))
                 runFor(store);

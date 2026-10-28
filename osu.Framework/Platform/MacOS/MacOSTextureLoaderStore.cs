@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.IO;
@@ -7,7 +7,7 @@ using osu.Framework.IO.Stores;
 using osu.Framework.Platform.Apple;
 using osu.Framework.Platform.Apple.Native;
 using osu.Framework.Platform.MacOS.Native;
-using SixLabors.ImageSharp;
+using osu.Framework.Imaging;
 
 namespace osu.Framework.Platform.MacOS
 {

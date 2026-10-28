@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Diagnostics;
@@ -24,6 +24,11 @@ namespace osu.Framework.Allocation
 
         private readonly Buffer[] buffers = new Buffer[buffer_count];
         private readonly Stopwatch stopwatch = new Stopwatch();
+
+        /// <summary>
+        /// Set whenever a write finishes, so a reader waiting for one can block instead of spinning.
+        /// </summary>
+        private readonly ManualResetEventSlim writeFinished = new ManualResetEventSlim();
 
         private int writeIndex;
         private int flipIndex = 1;
@@ -57,13 +62,24 @@ namespace osu.Framework.Allocation
 
             while (true)
             {
+                // Reset before checking, so that a write finishing after the check still wakes the wait below.
+                writeFinished.Reset();
+
                 flip(ref readIndex);
 
                 if (buffers[readIndex].LastUsage != UsageType.Read)
                     break;
 
-                if (timeout == 0 || stopwatch.ElapsedMilliseconds > timeout)
+                if (timeout == 0)
                     return null;
+
+                int remaining = timeout - (int)stopwatch.ElapsedMilliseconds;
+
+                if (remaining < 0)
+                    return null;
+
+                // Spinning here occupied a whole core whenever the reader outpaced the writer (e.g. the draw thread waiting on update).
+                writeFinished.Wait(remaining);
             }
 
             Buffer usage = buffers[readIndex];
@@ -77,7 +93,10 @@ namespace osu.Framework.Allocation
         private void finishUsage(Buffer usage)
         {
             if (usage.LastUsage == UsageType.Write)
+            {
                 flip(ref writeIndex);
+                writeFinished.Set();
+            }
         }
 
         private void flip(ref int localIndex)

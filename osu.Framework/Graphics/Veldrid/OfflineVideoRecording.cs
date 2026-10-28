@@ -70,12 +70,16 @@ namespace osu.Framework.Graphics.Veldrid
             Marshal.ThrowExceptionForHR(g0_record_prepare(device));
             Marshal.ThrowExceptionForHR(g0_record_open_configured(device, path, this.width, this.height,
                 (uint)AudioSampleRate, (uint)AudioChannels, (uint)options.FrameRate, (uint)options.Bitrate, (uint)options.H264Profile, out recorder));
+
+            // Nothing is pending yet; this fails now, rather than after the whole export, if the native library is outdated.
+            Marshal.ThrowExceptionForHR(g0_record_offline_flush(recorder));
         }
 
         /// <summary>
         /// Submits one completed GPU frame and its corresponding stereo float sample frames.
         /// Advance and mix the private scene for this interval before calling. The source
         /// texture can be reused on return; native encoder surfaces have separate leases.
+        /// The frame reaches the encoder with the next call or <see cref="Complete"/>, once its conversion has finished.
         /// An encoding failure makes the recording unusable and must abort the export.
         /// </summary>
         public void WriteFrame(Texture texture, float[] audio)
@@ -122,9 +126,10 @@ namespace osu.Framework.Graphics.Veldrid
 
             try
             {
+                Marshal.ThrowExceptionForHR(g0_record_offline_flush(recorder));
                 g0_record_stats(recorder, out ulong accepted, out ulong poolDrops, out ulong cadenceDrops);
                 if (accepted != (ulong)WrittenFrames || poolDrops != 0 || cadenceDrops != 0)
-                    throw new InvalidOperationException(@"The offline encoder did not preserve every submitted frame.");
+                    throw new InvalidOperationException($@"The offline encoder did not preserve every submitted frame ({accepted} of {WrittenFrames} accepted, {poolDrops} pool and {cadenceDrops} cadence drops).");
                 IntPtr closing = recorder;
                 recorder = IntPtr.Zero;
                 Marshal.ThrowExceptionForHR(g0_record_close(closing));
@@ -170,6 +175,9 @@ namespace osu.Framework.Graphics.Veldrid
 
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_offline_frame(IntPtr recorder, IntPtr texture, long index);
+
+        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int g0_record_offline_flush(IntPtr recorder);
 
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_audio(IntPtr recorder, [In] float[] pcm, uint frames, long position);

@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Diagnostics;
@@ -70,10 +70,10 @@ namespace osu.Framework.Graphics.OpenGL.Textures
             {
                 GL.ActiveTexture(TextureUnit.Texture0 + (int)i);
 
-                GL.PixelStore(PixelStoreParameter.UnpackRowLength, videoUpload.Frame->linesize[i]);
+                GL.PixelStore(PixelStoreParameter.UnpackRowLength, videoUpload.GetPlaneStride(i));
 
                 GL.TexSubImage2D(TextureTarget2d.Texture2D, 0, 0, 0, videoUpload.GetPlaneWidth(i), videoUpload.GetPlaneHeight(i),
-                    PixelFormat, PixelType, (IntPtr)videoUpload.Frame->data[i]);
+                    PixelFormat, PixelType, videoUpload.GetPlaneData(i));
 
                 GL.PixelStore(PixelStoreParameter.UnpackRowLength, 0);
             }

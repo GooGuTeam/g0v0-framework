@@ -122,8 +122,17 @@ namespace osu.Framework.Audio
         public readonly BindableBool WasapiIsExclusive = new();
         public readonly BindableBool WasapiAutoSharedOnBackground = new();
         // BASS accpets a float but let us use double here to avoid fp issues.
-        public readonly BindableDouble WasapiBufferSize = new();
-        public readonly BindableDouble WasapiPeriod = new();
+        public readonly BindableDouble WasapiBufferMilliseconds = new();
+        public readonly BindableDouble WasapiPeriodMilliseconds = new();
+        public readonly BindableBool WasapiUseSamples = new();
+        public readonly BindableInt WasapiBufferSamples = new() { MinValue = 0, MaxValue = 192000 };
+        public readonly BindableInt WasapiPeriodSamples = new() { MinValue = 0, MaxValue = 192000 };
+
+        /// <summary>
+        /// Estimated WASAPI buffer latency in milliseconds, or null when WASAPI is not active.
+        /// This excludes unreported hardware and transport latency.
+        /// </summary>
+        public readonly IBindable<double?> WasapiLatencyMilliseconds = new Bindable<double?>();
 
         /// <summary>
         /// Volume of all samples played game-wide.
@@ -215,8 +224,11 @@ namespace osu.Framework.Audio
                 config.BindWith(FrameworkSetting.AudioUseWasapi, UseWasapi);
                 config.BindWith(FrameworkSetting.WasapiIsExclusive, WasapiIsExclusive);
                 config.BindWith(FrameworkSetting.WasapiAutoSharedOnBackground, WasapiAutoSharedOnBackground);
-                config.BindWith(FrameworkSetting.WasapiBufferSize, WasapiBufferSize);
-                config.BindWith(FrameworkSetting.WasapiPeriod, WasapiPeriod);
+                config.BindWith(FrameworkSetting.WasapiBufferMilliseconds, WasapiBufferMilliseconds);
+                config.BindWith(FrameworkSetting.WasapiPeriodMilliseconds, WasapiPeriodMilliseconds);
+                config.BindWith(FrameworkSetting.WasapiUseSamples, WasapiUseSamples);
+                config.BindWith(FrameworkSetting.WasapiBufferSamples, WasapiBufferSamples);
+                config.BindWith(FrameworkSetting.WasapiPeriodSamples, WasapiPeriodSamples);
                 config.BindWith(FrameworkSetting.VolumeUniversal, Volume);
                 config.BindWith(FrameworkSetting.VolumeEffect, VolumeSample);
                 config.BindWith(FrameworkSetting.VolumeMusic, VolumeTrack);
@@ -231,14 +243,17 @@ namespace osu.Framework.Audio
                 if (UseWasapi.Value && WasapiIsExclusive.Value && WasapiAutoSharedOnBackground.Value)
                     scheduler.AddOnce(initCurrentDevice);
             };
-            WasapiBufferSize.MinValue = 0;
-            WasapiBufferSize.MaxValue = 0.5;
-            WasapiBufferSize.Precision = 1e-3;
-            WasapiPeriod.MinValue = 0;
-            WasapiPeriod.MaxValue = 0.5;
-            WasapiPeriod.Precision = 1e-3;
-            WasapiBufferSize.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
-            WasapiPeriod.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
+            WasapiBufferMilliseconds.MinValue = 0;
+            WasapiBufferMilliseconds.MaxValue = 500;
+            WasapiBufferMilliseconds.Precision = 0.1;
+            WasapiPeriodMilliseconds.MinValue = 0;
+            WasapiPeriodMilliseconds.MaxValue = 500;
+            WasapiPeriodMilliseconds.Precision = 0.1;
+            WasapiBufferMilliseconds.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
+            WasapiPeriodMilliseconds.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
+            WasapiUseSamples.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
+            WasapiBufferSamples.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
+            WasapiPeriodSamples.ValueChanged += _ => scheduler.AddOnce(initCurrentDevice);
             // initCurrentDevice not required for changes to `GlobalMixerHandle` as it is only changed when experimental wasapi is toggled (handled above).
             GlobalMixerHandle.ValueChanged += handle => usingGlobalMixer.Value = handle.NewValue.HasValue;
 
@@ -539,7 +554,10 @@ namespace osu.Framework.Audio
             bool attemptInit()
             {
                 bool isExclusive = WasapiIsExclusive.Value && (!WasapiAutoSharedOnBackground.Value || thread.IsActive.Value);
-                bool innerSuccess = thread.InitDevice(device, UseWasapi.Value, isExclusive, WasapiBufferSize.Value, WasapiPeriod.Value);
+                bool innerSuccess = thread.InitDevice(device, UseWasapi.Value, isExclusive,
+                    WasapiUseSamples.Value ? WasapiBufferSamples.Value : WasapiBufferMilliseconds.Value / 1000,
+                    WasapiUseSamples.Value ? WasapiPeriodSamples.Value : WasapiPeriodMilliseconds.Value / 1000,
+                    WasapiUseSamples.Value);
 
                 if (!innerSuccess)
                 {
