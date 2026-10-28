@@ -20,7 +20,7 @@ cmake --install native/artifacts/obj/image-codecs-android-arm64 --prefix native/
 
 The library links the C++ runtime statically (no Visual C++ redistributable or system libstdc++ needed).
 
-The `g0v0.Framework` package carries the library under `runtimes/<rid>/native/` for win-x64, win-arm64, linux-x64, osx-x64 and osx-arm64, with the third-party licences under `licences/`. `.github/workflows/build-image-codecs.yml` builds each platform on its own runner; the release workflow downloads them to `artifacts/<rid>/image-codecs/` and packs with `-p:PackImageCodecs=true -p:BuildImageCodecs=false`, then checks the package with `verify-image-codecs-package.py`. Packing without `PackImageCodecs` fails, so a package never ships without the decoder. Android and iOS are not packaged; mobile builds use the framework from source.
+The `g0v0.Framework` package carries the library under `runtimes/<rid>/native/` for win-x64, win-arm64, linux-x64, linux-arm64, osx-x64 and osx-arm64, with the third-party licences under `licences/`. `.github/workflows/build-image-codecs.yml` builds each platform on its own runner; the release workflow downloads them to `artifacts/<rid>/image-codecs/` and packs with `-p:PackImageCodecs=true -p:BuildImageCodecs=false`, then checks the package with `verify-image-codecs-package.py`. Packing without `PackImageCodecs` fails, so a package never ships without the decoder. Android and iOS are not packaged; mobile builds use the framework from source.
 
 ## Recording
 

@@ -51,6 +51,7 @@
     <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)win-x64/image-codecs/g0v0-image-codecs.dll" PackagePath="runtimes/win-x64/native/" />
     <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)win-arm64/image-codecs/g0v0-image-codecs.dll" PackagePath="runtimes/win-arm64/native/" />
     <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)linux-x64/image-codecs/libg0v0-image-codecs.so" PackagePath="runtimes/linux-x64/native/" />
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)linux-arm64/image-codecs/libg0v0-image-codecs.so" PackagePath="runtimes/linux-arm64/native/" />
     <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)osx-x64/image-codecs/libg0v0-image-codecs.dylib" PackagePath="runtimes/osx-x64/native/" />
     <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)osx-arm64/image-codecs/libg0v0-image-codecs.dylib" PackagePath="runtimes/osx-arm64/native/" />
     <None Include="@(_ImageCodecsPackageFile)" Pack="true" Visible="false" />

@@ -90,7 +90,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for rid in win-x64 win-arm64 linux-x64 osx-x64 osx-arm64; do
+          for rid in win-x64 win-arm64 linux-x64 linux-arm64 osx-x64 osx-arm64; do
             mkdir -p "native/artifacts/$rid"
             mv "native/artifacts/image-codecs/image-codecs-$rid" "native/artifacts/$rid/image-codecs"
           done

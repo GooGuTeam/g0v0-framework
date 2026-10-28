@@ -15,6 +15,7 @@ libraries = {
     "win-x64": ("g0v0-image-codecs.dll", b"MZ"),
     "win-arm64": ("g0v0-image-codecs.dll", b"MZ"),
     "linux-x64": ("libg0v0-image-codecs.so", b"\x7fELF"),
+    "linux-arm64": ("libg0v0-image-codecs.so", b"\x7fELF"),
     "osx-x64": ("libg0v0-image-codecs.dylib", b"\xcf\xfa\xed\xfe"),
     "osx-arm64": ("libg0v0-image-codecs.dylib", b"\xcf\xfa\xed\xfe"),
 }
