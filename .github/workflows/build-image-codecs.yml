@@ -1,0 +1,44 @@
+name: Build image codec libraries
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ matrix.rid }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: win-x64, os: windows-2022 }
+          - { rid: win-arm64, os: windows-11-arm }
+          - { rid: linux-x64, os: ubuntu-22.04 }
+          - { rid: osx-x64, os: macos-15-intel }
+          - { rid: osx-arm64, os: macos-15 }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Compile
+        shell: bash
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '12.0'
+        run: |
+          set -euo pipefail
+          cmake -S native/image-codecs -B native/artifacts/obj/image-codecs-${{ matrix.rid }} -DCMAKE_BUILD_TYPE=Release
+          cmake --build native/artifacts/obj/image-codecs-${{ matrix.rid }} --config Release --parallel
+          cmake --install native/artifacts/obj/image-codecs-${{ matrix.rid }} --config Release --prefix native/artifacts/${{ matrix.rid }}/image-codecs
+
+      - name: Upload library and licences
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-codecs-${{ matrix.rid }}
+          path: native/artifacts/${{ matrix.rid }}/image-codecs
+          if-no-files-found: error

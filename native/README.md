@@ -1,8 +1,33 @@
-# Recording native integration
+# Native libraries
+
+## Image codecs
+
+`image-codecs/` builds `g0v0-image-codecs`, which decodes and resizes images for `osu.Framework.Imaging` (Wuffs, stb_image_write, Simd and cpu_features, all as submodules under `image-codecs/third_party`). Initialise them once:
+
+```bash
+git submodule update --init --recursive
+```
+
+`ImageCodecs.targets` copies the library for the target platform from `artifacts/<rid>/image-codecs/` into the output. When the target is the build machine's own platform (RID-less builds, or a RID matching the host), the library is compiled with CMake whenever it is missing or older than its sources, so a C++ toolchain and CMake 3.24+ are required. `-p:BuildImageCodecs=false` requires a prebuilt library instead; `-p:ImageCodecsDirectory=<dir>` points at one.
+
+Other RIDs need a prebuilt library. Android arm64 is cross-compiled with the NDK:
+
+```bash
+cmake -S native/image-codecs -B native/artifacts/obj/image-codecs-android-arm64 -G Ninja   -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 -DCMAKE_BUILD_TYPE=Release
+cmake --build native/artifacts/obj/image-codecs-android-arm64
+cmake --install native/artifacts/obj/image-codecs-android-arm64 --prefix native/artifacts/android-arm64/image-codecs
+```
+
+The library links the C++ runtime statically (no Visual C++ redistributable or system libstdc++ needed).
+
+The `g0v0.Framework` package carries the library under `runtimes/<rid>/native/` for win-x64, win-arm64, linux-x64, osx-x64 and osx-arm64, with the third-party licences under `licences/`. `.github/workflows/build-image-codecs.yml` builds each platform on its own runner; the release workflow downloads them to `artifacts/<rid>/image-codecs/` and packs with `-p:PackImageCodecs=true -p:BuildImageCodecs=false`, then checks the package with `verify-image-codecs-package.py`. Packing without `PackImageCodecs` fails, so a package never ships without the decoder. Android and iOS are not packaged; mobile builds use the framework from source.
+
+## Recording
+
 
 The recording libraries target **Windows x64**. Linux/macOS offline export uses FFmpeg. Windows ARM64/x86 native recording is not supplied.
 
-## Build-only entry point
+### Build-only entry point
 
 ```powershell
 ./native/build-recording.ps1 -DownloadToolchain
@@ -14,7 +39,7 @@ Zig 0.14.1 and Vulkan-Headers 1.4.309 are pinned in `recording-toolchain.json`; 
 
 Outputs are `native/artifacts/win-x64/g0v0-gpu-video.dll`, `g0v0-wasapi-capture.dll` and `SHA256SUMS`. Compilation uses a temporary staging directory and copies DLLs only after both libraries compile. Toolchains and outputs are ignored by Git. Use `-OutputDirectory` to change the destination or `-DeployDirectory` to explicitly copy and hash-check DLLs into an existing, unlocked client output directory.
 
-## MSBuild
+### MSBuild
 
 `osu.Framework.csproj` imports `native/RecordingNative.targets`:
 
@@ -26,7 +51,7 @@ Outputs are `native/artifacts/win-x64/g0v0-gpu-video.dll`, `g0v0-wasapi-capture.
 
 Do not publish packages using temporary local framework/Veldrid references. The presentation API changes still require an approved Veldrid package before the framework's package-only build can pass.
 
-## CI/CD
+### CI/CD
 
 `build-recording-native.yml` is a reusable build-only workflow on Windows 2022. It caches the pinned toolchain, compiles both DLLs, inspects an isolated NuGet packaging artifact and uploads DLLs with checksums. It is called by framework CI and release. Existing managed test jobs are unchanged; no native probe job is added.
 

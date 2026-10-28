@@ -1,0 +1,12 @@
+[submodule "native/image-codecs/third_party/wuffs"]
+	path = native/image-codecs/third_party/wuffs
+	url = https://github.com/google/wuffs.git
+[submodule "native/image-codecs/third_party/stb"]
+	path = native/image-codecs/third_party/stb
+	url = https://github.com/nothings/stb.git
+[submodule "native/image-codecs/third_party/simd"]
+	path = native/image-codecs/third_party/simd
+	url = https://github.com/ermig1979/Simd.git
+[submodule "native/image-codecs/third_party/cpu_features"]
+	path = native/image-codecs/third_party/cpu_features
+	url = https://github.com/google/cpu_features.git

@@ -1,0 +1,61 @@
+<Project>
+  <PropertyGroup>
+    <_ImageCodecsArchitecture>$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant())</_ImageCodecsArchitecture>
+    <_ImageCodecsDesktop Condition="'$(TargetPlatformIdentifier)' != 'android' and '$(TargetPlatformIdentifier)' != 'ios'">true</_ImageCodecsDesktop>
+    <ImageCodecsRid Condition="'$(ImageCodecsRid)' == '' and '$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</ImageCodecsRid>
+    <!-- RID-less desktop builds run on the build machine, so the library is built for (and copied beside the application on) that platform. -->
+    <ImageCodecsRid Condition="'$(ImageCodecsRid)' == '' and '$(_ImageCodecsDesktop)' == 'true' and $([MSBuild]::IsOSPlatform('Windows')) and '$(PlatformTarget)' != 'x86' and '$(PlatformTarget)' != 'ARM64'">win-$(_ImageCodecsArchitecture)</ImageCodecsRid>
+    <ImageCodecsRid Condition="'$(ImageCodecsRid)' == '' and '$(_ImageCodecsDesktop)' == 'true' and $([MSBuild]::IsOSPlatform('Linux'))">linux-$(_ImageCodecsArchitecture)</ImageCodecsRid>
+    <ImageCodecsRid Condition="'$(ImageCodecsRid)' == '' and '$(_ImageCodecsDesktop)' == 'true' and $([MSBuild]::IsOSPlatform('OSX'))">osx-$(_ImageCodecsArchitecture)</ImageCodecsRid>
+    <ImageCodecsDirectory Condition="'$(ImageCodecsDirectory)' == '' and '$(ImageCodecsRid)' != ''">$(MSBuildThisFileDirectory)artifacts/$(ImageCodecsRid)/image-codecs</ImageCodecsDirectory>
+    <_ImageCodecsFile Condition="$([System.String]::Copy('$(ImageCodecsRid)').StartsWith('win-'))">g0v0-image-codecs.dll</_ImageCodecsFile>
+    <_ImageCodecsFile Condition="$([System.String]::Copy('$(ImageCodecsRid)').StartsWith('linux-'))">libg0v0-image-codecs.so</_ImageCodecsFile>
+    <_ImageCodecsFile Condition="$([System.String]::Copy('$(ImageCodecsRid)').StartsWith('osx-'))">libg0v0-image-codecs.dylib</_ImageCodecsFile>
+    <!-- The library is compiled with CMake when it is missing or older than its sources. Only the build machine's own platform can be
+         compiled this way; other RIDs need a prebuilt library in ImageCodecsDirectory. Pass -p:BuildImageCodecs=false to require a prebuilt one. -->
+    <BuildImageCodecs Condition="'$(BuildImageCodecs)' == '' and '$(ImageCodecsRid)' == 'win-$(_ImageCodecsArchitecture)' and $([MSBuild]::IsOSPlatform('Windows'))">true</BuildImageCodecs>
+    <BuildImageCodecs Condition="'$(BuildImageCodecs)' == '' and '$(ImageCodecsRid)' == 'linux-$(_ImageCodecsArchitecture)' and $([MSBuild]::IsOSPlatform('Linux'))">true</BuildImageCodecs>
+    <BuildImageCodecs Condition="'$(BuildImageCodecs)' == '' and '$(ImageCodecsRid)' == 'osx-$(_ImageCodecsArchitecture)' and $([MSBuild]::IsOSPlatform('OSX'))">true</BuildImageCodecs>
+    <_ImageCodecsSource>$(MSBuildThisFileDirectory)image-codecs</_ImageCodecsSource>
+    <_ImageCodecsBuildDirectory>$(MSBuildThisFileDirectory)artifacts/obj/image-codecs-$(ImageCodecsRid)</_ImageCodecsBuildDirectory>
+  </PropertyGroup>
+  <!-- Not when packing: this item would shadow the packaged copy of the same file. -->
+  <ItemGroup Condition="'$(ImageCodecsDirectory)' != '' and '$(_ImageCodecsFile)' != '' and '$(PackImageCodecs)' != 'true'">
+    <Content Include="$(ImageCodecsDirectory)/$(_ImageCodecsFile)" Link="$(_ImageCodecsFile)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="false" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(BuildImageCodecs)' == 'true' and '$(_ImageCodecsFile)' != ''">
+    <_ImageCodecsSourceFile Include="$(_ImageCodecsSource)/*.cpp;$(_ImageCodecsSource)/*.h;$(_ImageCodecsSource)/*.cmake;$(_ImageCodecsSource)/CMakeLists.txt" />
+  </ItemGroup>
+  <Target Name="BuildImageCodecs" BeforeTargets="PrepareForBuild" Condition="'$(BuildImageCodecs)' == 'true' and '$(_ImageCodecsFile)' != '' and '$(DesignTimeBuild)' != 'true'"
+          Inputs="@(_ImageCodecsSourceFile)" Outputs="$(ImageCodecsDirectory)/$(_ImageCodecsFile)">
+    <Error Condition="!Exists('$(_ImageCodecsSource)/third_party/wuffs/release/c')" Text="Image codec submodules are missing. Run git submodule update --init --recursive in the framework repository." />
+    <Exec Command="cmake -S &quot;$(_ImageCodecsSource)&quot; -B &quot;$(_ImageCodecsBuildDirectory)&quot; -DCMAKE_BUILD_TYPE=Release" />
+    <Exec Command="cmake --build &quot;$(_ImageCodecsBuildDirectory)&quot; --config Release --parallel" />
+    <Exec Command="cmake --install &quot;$(_ImageCodecsBuildDirectory)&quot; --config Release --prefix &quot;$(ImageCodecsDirectory)&quot;" />
+    <!-- Installation keeps the library's own timestamp, which may predate a newer source file; touch it so the next build is incremental. -->
+    <Touch Files="$(ImageCodecsDirectory)/$(_ImageCodecsFile)" />
+  </Target>
+  <Target Name="ValidateImageCodecArtifact" BeforeTargets="PrepareForBuild" DependsOnTargets="BuildImageCodecs" Condition="'$(ImageCodecsDirectory)' != '' and '$(_ImageCodecsFile)' != '' and '$(DesignTimeBuild)' != 'true'">
+    <Error Condition="!Exists('$(ImageCodecsDirectory)/$(_ImageCodecsFile)')" Text="Image codec native library $(ImageCodecsDirectory)/$(_ImageCodecsFile) is missing. Build native/image-codecs for $(ImageCodecsRid) with CMake and install it there." />
+  </Target>
+  <!-- Packages carry the library for every desktop platform. Release CI builds them with build-image-codecs.yml and downloads them to
+       artifacts/<rid>/image-codecs before packing with -p:PackImageCodecs=true. -->
+  <PropertyGroup>
+    <PackImageCodecs Condition="'$(PackImageCodecs)' == ''">false</PackImageCodecs>
+    <_ImageCodecsArtifacts>$(MSBuildThisFileDirectory)artifacts/</_ImageCodecsArtifacts>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(PackImageCodecs)' == 'true'">
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)win-x64/image-codecs/g0v0-image-codecs.dll" PackagePath="runtimes/win-x64/native/" />
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)win-arm64/image-codecs/g0v0-image-codecs.dll" PackagePath="runtimes/win-arm64/native/" />
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)linux-x64/image-codecs/libg0v0-image-codecs.so" PackagePath="runtimes/linux-x64/native/" />
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)osx-x64/image-codecs/libg0v0-image-codecs.dylib" PackagePath="runtimes/osx-x64/native/" />
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)osx-arm64/image-codecs/libg0v0-image-codecs.dylib" PackagePath="runtimes/osx-arm64/native/" />
+    <None Include="@(_ImageCodecsPackageFile)" Pack="true" Visible="false" />
+    <None Include="$(_ImageCodecsArtifacts)linux-x64/image-codecs/licences/LICENCE-*" Pack="true" PackagePath="licences/" Visible="false" />
+  </ItemGroup>
+  <Target Name="ValidateImageCodecPackage" BeforeTargets="GenerateNuspec">
+    <Error Condition="'$(PackImageCodecs)' != 'true'" Text="The framework package needs the image codec library for every platform. Download the build-image-codecs.yml artifacts to native/artifacts/&lt;rid&gt;/image-codecs and pack with -p:PackImageCodecs=true." />
+    <Error Condition="!Exists('%(_ImageCodecsPackageFile.Identity)')" Text="Image codec library %(_ImageCodecsPackageFile.Identity) is missing." />
+    <Error Condition="!Exists('$(_ImageCodecsArtifacts)linux-x64/image-codecs/licences/LICENCE-Wuffs-MIT')" Text="Image codec licences are missing from $(_ImageCodecsArtifacts)linux-x64/image-codecs/licences." />
+  </Target>
+</Project>

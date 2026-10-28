@@ -20,6 +20,11 @@ jobs:
     permissions:
       contents: read
 
+  image-codecs:
+    uses: ./.github/workflows/build-image-codecs.yml
+    permissions:
+      contents: read
+
   version:
     name: Compute version
     runs-on: ubuntu-latest
@@ -50,7 +55,7 @@ jobs:
 
   nuget:
     name: Pack & Publish NuGet
-    needs: [version, recording-native]
+    needs: [version, recording-native, image-codecs]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -75,12 +80,29 @@ jobs:
         working-directory: native/artifacts/win-x64
         run: sha256sum --check SHA256SUMS
 
+      - name: Download image codec libraries
+        uses: actions/download-artifact@v5
+        with:
+          pattern: image-codecs-*
+          path: native/artifacts/image-codecs
+
+      - name: Arrange image codec libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          for rid in win-x64 win-arm64 linux-x64 osx-x64 osx-arm64; do
+            mkdir -p "native/artifacts/$rid"
+            mv "native/artifacts/image-codecs/image-codecs-$rid" "native/artifacts/$rid/image-codecs"
+          done
+
       - name: Pack
         run: |
           dotnet pack -c Release osu.Framework \
             /p:Version=${{ needs.version.outputs.nugetVersion }} \
             /p:GenerateDocumentationFile=true \
             /p:PackRecordingNative=true \
+            /p:PackImageCodecs=true \
+            /p:BuildImageCodecs=false \
             /p:IncludeSymbols=true \
             /p:SymbolPackageFormat=snupkg \
             -o artifacts
@@ -89,6 +111,7 @@ jobs:
         run: |
           for package in artifacts/*.nupkg; do
             python3 native/verify-recording-package.py "$package" native/artifacts/win-x64
+            python3 native/verify-image-codecs-package.py "$package" native/artifacts
           done
 
       - name: Upload NuGet artifacts
