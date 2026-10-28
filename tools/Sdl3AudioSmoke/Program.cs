@@ -2,43 +2,49 @@ using System.Runtime.InteropServices;
 
 // Standalone control-plane probe. All mixing runs in SDL's native device thread.
 // Run on the main thread; all control calls are serialized here.
-if (args.Length < 1)
+internal static class Program
 {
-    Console.Error.WriteLine("Usage: Sdl3AudioSmoke <audio-file> [sample-frames=256] [driver=wasapi|default] [gc-stress]");
-    return 2;
-}
-int frames = args.Length > 1 ? int.Parse(args[1]) : 256;
-IntPtr engine = Native.g0_audio_create(frames, args.Length > 2 && args[2] == "default" ? 0 : 1);
-if (engine == IntPtr.Zero) throw new InvalidOperationException(Native.Error);
-try
-{
-    int voice = Native.g0_audio_load(engine, Path.GetFullPath(args[0]));
-    if (voice < 0) throw new InvalidOperationException(Native.Error);
-    if (Native.g0_audio_gain(engine, voice, 0.05f) == 0 || Native.g0_audio_play(engine, voice) == 0)
-        throw new InvalidOperationException(Native.Error);
-    Console.WriteLine($"Driver={Marshal.PtrToStringUTF8(Native.g0_audio_driver())}; requestedFrames={frames}; actualFrames={Native.g0_audio_device_frames(engine)}");
-    // Deliberately block the managed control thread. Native callbacks must continue.
-    Thread.Sleep(500);
-    int before = Native.g0_audio_callbacks(engine);
-    if (args.Contains("gc-stress"))
+    public static int Main(string[] args)
     {
-        for (int i = 0; i < 20; ++i)
+        if (args.Length < 1)
         {
-            _ = new byte[8 * 1024 * 1024];
-            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+            Console.Error.WriteLine("Usage: Sdl3AudioSmoke <audio-file> [sample-frames=256] [driver=wasapi|default] [gc-stress]");
+            return 2;
+        }
+        int frames = args.Length > 1 ? int.Parse(args[1]) : 256;
+        IntPtr engine = Native.g0_audio_create(frames, args.Length > 2 && args[2] == "default" ? 0 : 1);
+        if (engine == IntPtr.Zero) throw new InvalidOperationException(Native.Error);
+        try
+        {
+            int voice = Native.g0_audio_load(engine, Path.GetFullPath(args[0]));
+            if (voice < 0) throw new InvalidOperationException(Native.Error);
+            if (Native.g0_audio_gain(engine, voice, 0.05f) == 0 || Native.g0_audio_play(engine, voice) == 0)
+                throw new InvalidOperationException(Native.Error);
+            Console.WriteLine($"Driver={Marshal.PtrToStringUTF8(Native.g0_audio_driver())}; requestedFrames={frames}; actualFrames={Native.g0_audio_device_frames(engine)}");
+            // Deliberately block the managed control thread. Native callbacks must continue.
+            Thread.Sleep(500);
+            int before = Native.g0_audio_callbacks(engine);
+            if (args.Contains("gc-stress"))
+            {
+                for (int i = 0; i < 20; ++i)
+                {
+                    _ = new byte[8 * 1024 * 1024];
+                    GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+                }
+            }
+            Thread.Sleep(1000);
+            int after = Native.g0_audio_callbacks(engine);
+            Console.WriteLine($"Native callbacks: {before} -> {after}; source position={Native.g0_audio_position(engine, voice):F3}s (not a DAC clock)");
+            if (after <= before) throw new InvalidOperationException("Native audio callbacks did not advance.");
+            if (Native.g0_audio_seek(engine, voice, 0.25) == 0 || Native.g0_audio_frequency(engine, voice, 1.1f) == 0)
+                throw new InvalidOperationException(Native.Error);
+            Thread.Sleep(250);
+            if (Native.g0_audio_stop(engine, voice) == 0) throw new InvalidOperationException(Native.Error);
+            return 0;
+        }
+        finally
+        {
+            Native.g0_audio_destroy(engine);
         }
     }
-    Thread.Sleep(1000);
-    int after = Native.g0_audio_callbacks(engine);
-    Console.WriteLine($"Native callbacks: {before} -> {after}; source position={Native.g0_audio_position(engine, voice):F3}s (not a DAC clock)");
-    if (after <= before) throw new InvalidOperationException("Native audio callbacks did not advance.");
-    if (Native.g0_audio_seek(engine, voice, 0.25) == 0 || Native.g0_audio_frequency(engine, voice, 1.1f) == 0)
-        throw new InvalidOperationException(Native.Error);
-    Thread.Sleep(250);
-    if (Native.g0_audio_stop(engine, voice) == 0) throw new InvalidOperationException(Native.Error);
-    return 0;
-}
-finally
-{
-    Native.g0_audio_destroy(engine);
 }
