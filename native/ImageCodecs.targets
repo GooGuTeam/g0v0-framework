@@ -17,6 +17,8 @@
     <BuildImageCodecs Condition="'$(BuildImageCodecs)' == '' and '$(ImageCodecsRid)' == 'linux-$(_ImageCodecsArchitecture)' and $([MSBuild]::IsOSPlatform('Linux'))">true</BuildImageCodecs>
     <BuildImageCodecs Condition="'$(BuildImageCodecs)' == '' and '$(ImageCodecsRid)' == 'osx-$(_ImageCodecsArchitecture)' and $([MSBuild]::IsOSPlatform('OSX'))">true</BuildImageCodecs>
     <_ImageCodecsSource>$(MSBuildThisFileDirectory)image-codecs</_ImageCodecsSource>
+    <!-- Compiler and CMake errors are still reported as errors. -->
+    <_ImageCodecsErrorPattern>(\berror\b[^:]*:|CMake Error)</_ImageCodecsErrorPattern>
     <_ImageCodecsBuildDirectory>$(MSBuildThisFileDirectory)artifacts/obj/image-codecs-$(ImageCodecsRid)</_ImageCodecsBuildDirectory>
   </PropertyGroup>
   <!-- Not when packing: this item would shadow the packaged copy of the same file. -->
@@ -28,10 +30,11 @@
   </ItemGroup>
   <Target Name="BuildImageCodecs" BeforeTargets="PrepareForBuild" Condition="'$(BuildImageCodecs)' == 'true' and '$(_ImageCodecsFile)' != '' and '$(DesignTimeBuild)' != 'true'"
           Inputs="@(_ImageCodecsSourceFile)" Outputs="$(ImageCodecsDirectory)/$(_ImageCodecsFile)">
+    <!-- Compiler warnings in third-party sources must not fail builds that treat MSBuild warnings as errors; CMake's exit code decides. -->
     <Error Condition="!Exists('$(_ImageCodecsSource)/third_party/wuffs/release/c')" Text="Image codec submodules are missing. Run git submodule update --init --recursive in the framework repository." />
-    <Exec Command="cmake -S &quot;$(_ImageCodecsSource)&quot; -B &quot;$(_ImageCodecsBuildDirectory)&quot; -DCMAKE_BUILD_TYPE=Release" />
-    <Exec Command="cmake --build &quot;$(_ImageCodecsBuildDirectory)&quot; --config Release --parallel" />
-    <Exec Command="cmake --install &quot;$(_ImageCodecsBuildDirectory)&quot; --config Release --prefix &quot;$(ImageCodecsDirectory)&quot;" />
+    <Exec IgnoreStandardErrorWarningFormat="true" CustomErrorRegularExpression="$(_ImageCodecsErrorPattern)" Command="cmake -S &quot;$(_ImageCodecsSource)&quot; -B &quot;$(_ImageCodecsBuildDirectory)&quot; -DCMAKE_BUILD_TYPE=Release" />
+    <Exec IgnoreStandardErrorWarningFormat="true" CustomErrorRegularExpression="$(_ImageCodecsErrorPattern)" Command="cmake --build &quot;$(_ImageCodecsBuildDirectory)&quot; --config Release --parallel" />
+    <Exec IgnoreStandardErrorWarningFormat="true" CustomErrorRegularExpression="$(_ImageCodecsErrorPattern)" Command="cmake --install &quot;$(_ImageCodecsBuildDirectory)&quot; --config Release --prefix &quot;$(ImageCodecsDirectory)&quot;" />
     <!-- Installation keeps the library's own timestamp, which may predate a newer source file; touch it so the next build is incremental. -->
     <Touch Files="$(ImageCodecsDirectory)/$(_ImageCodecsFile)" />
   </Target>
