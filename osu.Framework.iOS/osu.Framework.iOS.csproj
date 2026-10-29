@@ -4,15 +4,15 @@
     <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
     <OutputType>Library</OutputType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyTitle>osu!framework iOS</AssemblyTitle>
+    <AssemblyTitle>g0v0!framework iOS</AssemblyTitle>
     <AssemblyName>osu.Framework.iOS</AssemblyName>
     <RootNamespace>osu.Framework.iOS</RootNamespace>
     <Description>A 2D application/game framework written with rhythm games in mind.</Description>
   </PropertyGroup>
   <PropertyGroup Label="Nuget">
-    <Title>osu!framework iOS</Title>
-    <PackageId>ppy.osu.Framework.iOS</PackageId>
-    <PackageTags>osu game framework</PackageTags>
+    <Title>g0v0!framework iOS</Title>
+    <PackageId>g0v0.Framework.iOS</PackageId>
+    <PackageTags>g0v0 osu game framework</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\osu.Framework\osu.Framework.csproj" />

@@ -4,15 +4,15 @@
     <SupportedOSPlatformVersion>21.0</SupportedOSPlatformVersion>
     <OutputType>Library</OutputType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyTitle>osu!framework Android</AssemblyTitle>
+    <AssemblyTitle>g0v0!framework Android</AssemblyTitle>
     <AssemblyName>osu.Framework.Android</AssemblyName>
     <RootNamespace>osu.Framework.Android</RootNamespace>
     <Description>A 2D application/game framework written with rhythm games in mind.</Description>
   </PropertyGroup>
   <PropertyGroup Label="Nuget">
-    <Title>osu!framework Android</Title>
-    <PackageId>ppy.osu.Framework.Android</PackageId>
-    <PackageTags>osu game framework</PackageTags>
+    <Title>g0v0!framework Android</Title>
+    <PackageId>g0v0.Framework.Android</PackageId>
+    <PackageTags>g0v0 osu game framework</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\osu.Framework\osu.Framework.csproj" />

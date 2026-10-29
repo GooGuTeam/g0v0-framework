@@ -41,7 +41,7 @@
   <Target Name="ValidateImageCodecArtifact" BeforeTargets="PrepareForBuild" DependsOnTargets="BuildImageCodecs" Condition="'$(ImageCodecsDirectory)' != '' and '$(_ImageCodecsFile)' != '' and '$(DesignTimeBuild)' != 'true'">
     <Error Condition="!Exists('$(ImageCodecsDirectory)/$(_ImageCodecsFile)')" Text="Image codec native library $(ImageCodecsDirectory)/$(_ImageCodecsFile) is missing. Build native/image-codecs for $(ImageCodecsRid) with CMake and install it there." />
   </Target>
-  <!-- Packages carry the library for every desktop platform. Release CI builds them with build-image-codecs.yml and downloads them to
+  <!-- Packages carry the library for every desktop platform, Android arm64 and iOS. Release CI builds them with build-image-codecs.yml and downloads them to
        artifacts/<rid>/image-codecs before packing with -p:PackImageCodecs=true. -->
   <PropertyGroup>
     <PackImageCodecs Condition="'$(PackImageCodecs)' == ''">false</PackImageCodecs>
@@ -54,6 +54,12 @@
     <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)linux-arm64/image-codecs/libg0v0-image-codecs.so" PackagePath="runtimes/linux-arm64/native/" />
     <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)osx-x64/image-codecs/libg0v0-image-codecs.dylib" PackagePath="runtimes/osx-x64/native/" />
     <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)osx-arm64/image-codecs/libg0v0-image-codecs.dylib" PackagePath="runtimes/osx-arm64/native/" />
+    <!-- Also keeps Android from falling back to the glibc linux-arm64 library through the RID graph. -->
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)android-arm64/image-codecs/libg0v0-image-codecs.so" PackagePath="runtimes/android-arm64/native/" />
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)ios/image-codecs/g0v0-image-codecs.xcframework/Info.plist" PackagePath="runtimes/ios/native/g0v0-image-codecs.xcframework/" />
+    <!-- The iOS framework is shipped the way ppy.SDL3-CS ships SDL3.xcframework; iOS app builds embed it. -->
+    <None Include="$(_ImageCodecsArtifacts)ios/image-codecs/g0v0-image-codecs.xcframework/**" Exclude="$(_ImageCodecsArtifacts)ios/image-codecs/g0v0-image-codecs.xcframework/Info.plist"
+          Pack="true" PackagePath="runtimes/ios/native/g0v0-image-codecs.xcframework/" Visible="false" />
     <None Include="@(_ImageCodecsPackageFile)" Pack="true" Visible="false" />
     <None Include="$(_ImageCodecsArtifacts)linux-x64/image-codecs/licences/LICENCE-*" Pack="true" PackagePath="licences/" Visible="false" />
   </ItemGroup>

@@ -53,9 +53,100 @@ jobs:
           echo "nugetVersion=$NUMERIC" >> $GITHUB_OUTPUT
           echo "Publishing version: $VERSION (NuGet: $NUMERIC)"
 
+  # The mobile packages reference g0v0.Framework at the same version. Both need their platform workloads, so they are packed apart and
+  # published together with the framework by the nuget job. The framework project they reference needs the image codecs of the build machine.
+  android:
+    name: Pack Android
+    needs: [version, image-codecs]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup JDK 11
+        uses: actions/setup-java@v5
+        with:
+          distribution: microsoft
+          java-version: 11
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore .NET workloads
+        run: dotnet workload install android
+
+      - name: Download image codec libraries
+        uses: actions/download-artifact@v5
+        with:
+          name: image-codecs-win-x64
+          path: native/artifacts/win-x64/image-codecs
+
+      - name: Pack
+        shell: bash
+        run: |
+          dotnet pack -c Release osu.Framework.Android             /p:Version=${{ needs.version.outputs.nugetVersion }}             /p:BuildImageCodecs=false             /p:IncludeSymbols=true             /p:SymbolPackageFormat=snupkg             -o artifacts
+
+      - name: Upload NuGet artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuget-packages-android
+          path: |
+            artifacts/g0v0.Framework.Android.*.nupkg
+            artifacts/g0v0.Framework.Android.*.snupkg
+          if-no-files-found: error
+
+  ios:
+    name: Pack iOS
+    needs: [version, image-codecs]
+    runs-on: xcode-27
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # The same Xcode and workload versions as ci.yml.
+      - name: Restore .NET workloads
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
+          dotnet workload install ios --version 10.0.402
+
+      # The runner's architecture decides which macOS library the framework project needs.
+      - name: Download image codec libraries
+        uses: actions/download-artifact@v5
+        with:
+          pattern: image-codecs-osx-*
+          path: native/artifacts/image-codecs
+
+      - name: Arrange image codec libraries
+        run: |
+          set -euo pipefail
+          for rid in osx-x64 osx-arm64; do
+            mkdir -p "native/artifacts/$rid"
+            mv "native/artifacts/image-codecs/image-codecs-$rid" "native/artifacts/$rid/image-codecs"
+          done
+
+      - name: Pack
+        run: |
+          dotnet pack -c Release osu.Framework.iOS             /p:Version=${{ needs.version.outputs.nugetVersion }}             /p:BuildImageCodecs=false             /p:IncludeSymbols=true             /p:SymbolPackageFormat=snupkg             -o artifacts
+
+      - name: Upload NuGet artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuget-packages-ios
+          path: |
+            artifacts/g0v0.Framework.iOS.*.nupkg
+            artifacts/g0v0.Framework.iOS.*.snupkg
+          if-no-files-found: error
+
   nuget:
     name: Pack & Publish NuGet
-    needs: [version, recording-native, image-codecs]
+    needs: [version, recording-native, image-codecs, android, ios]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -90,7 +181,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for rid in win-x64 win-arm64 linux-x64 linux-arm64 osx-x64 osx-arm64; do
+          for rid in win-x64 win-arm64 linux-x64 linux-arm64 osx-x64 osx-arm64 android-arm64 ios; do
             mkdir -p "native/artifacts/$rid"
             mv "native/artifacts/image-codecs/image-codecs-$rid" "native/artifacts/$rid/image-codecs"
           done
@@ -109,10 +200,16 @@ jobs:
 
       - name: Verify packaged native assets
         run: |
-          for package in artifacts/*.nupkg; do
-            python3 native/verify-recording-package.py "$package" native/artifacts/win-x64
-            python3 native/verify-image-codecs-package.py "$package" native/artifacts
-          done
+          package=artifacts/g0v0.Framework.${{ needs.version.outputs.nugetVersion }}.nupkg
+          python3 native/verify-recording-package.py "$package" native/artifacts/win-x64
+          python3 native/verify-image-codecs-package.py "$package" native/artifacts
+
+      - name: Download mobile packages
+        uses: actions/download-artifact@v5
+        with:
+          pattern: nuget-packages-*
+          path: artifacts
+          merge-multiple: true
 
       - name: Upload NuGet artifacts
         uses: actions/upload-artifact@v7

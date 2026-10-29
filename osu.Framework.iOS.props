@@ -26,6 +26,9 @@
     <NativeReference Include="$(MSBuildThisFileDirectory)osu.Framework.iOS\runtimes\ios\native\libswresample.xcframework" Kind="Framework" SmartLink="false" ForceLoad="true" />
     <NativeReference Include="$(MSBuildThisFileDirectory)osu.Framework.iOS\runtimes\ios\native\libswscale.xcframework" Kind="Framework" SmartLink="false" ForceLoad="true" />
     <NativeReference Include="$(MSBuildThisFileDirectory)osu.Framework.iOS\runtimes\ios\native\metal-mono-workaround.xcframework" Kind="Framework" SmartLink="false" ForceLoad="true" />
+    <!-- The image codec framework from build-image-codecs.yml, downloaded to native/artifacts/ios/image-codecs. The g0v0.Framework package carries it itself. -->
+    <NativeReference Include="$(MSBuildThisFileDirectory)native\artifacts\ios\image-codecs\g0v0-image-codecs.xcframework" Kind="Framework" SmartLink="false"
+                     Condition="Exists('$(MSBuildThisFileDirectory)native\artifacts\ios\image-codecs\g0v0-image-codecs.xcframework')" />
   </ItemGroup>
 
   <!-- osu.Framework compiles the image codec library for the build machine and copies it to referencing projects.
