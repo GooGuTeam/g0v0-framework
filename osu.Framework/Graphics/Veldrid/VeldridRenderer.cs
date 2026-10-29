@@ -338,6 +338,14 @@ namespace osu.Framework.Graphics.Veldrid
         public void UpdateTexture<T>(global::Veldrid.Texture texture, int x, int y, int width, int height, int level, ReadOnlySpan<T> data)
             where T : unmanaged
         {
+            // Vulkan tracks image layouts while recording commands. Keep uploads in the same command list as
+            // mipmap generation and drawing, so a later upload cannot execute before an already recorded read.
+            if (Device.BackendType == GraphicsBackend.Vulkan)
+            {
+                graphicsPipeline.UpdateTexture(stagingTexturePool, texture, x, y, width, height, level, data);
+                return;
+            }
+
             ensureTextureUploadPipelineBegan();
             textureUploadPipeline.UpdateTexture(stagingTexturePool, texture, x, y, width, height, level, data);
         }
@@ -354,7 +362,11 @@ namespace osu.Framework.Graphics.Veldrid
         /// <param name="data">The texture data.</param>
         /// <param name="rowLengthInBytes">The number of bytes per row of the image to read from <paramref name="data"/>.</param>
         public void UpdateTexture(global::Veldrid.Texture texture, int x, int y, int width, int height, int level, IntPtr data, int rowLengthInBytes)
-            => bufferUpdatePipeline.UpdateTexture(stagingTexturePool, texture, x, y, width, height, level, data, rowLengthInBytes);
+        {
+            // Pointer uploads (including video frames and atlas updates) need the same ordering as span uploads.
+            var pipeline = Device.BackendType == GraphicsBackend.Vulkan ? graphicsPipeline : bufferUpdatePipeline;
+            pipeline.UpdateTexture(stagingTexturePool, texture, x, y, width, height, level, data, rowLengthInBytes);
+        }
 
         protected override void SetUniformImplementation<T>(IUniformWithValue<T> uniform)
         {
