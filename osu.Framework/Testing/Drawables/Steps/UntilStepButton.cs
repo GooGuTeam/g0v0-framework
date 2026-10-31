@@ -7,6 +7,7 @@ using System.Runtime.ExceptionServices;
 using System.Text;
 using NUnit.Framework;
 using osu.Framework.Graphics;
+using osu.Framework.Graphics.Sprites;
 using osuTK.Graphics;
 
 namespace osu.Framework.Testing.Drawables.Steps
@@ -21,6 +22,8 @@ namespace osu.Framework.Testing.Drawables.Steps
         public new Action? Action { get; set; }
 
         public override int RequiredRepetitions => success ? 0 : int.MaxValue;
+
+        protected override IconUsage DefaultIcon => FontAwesome.Solid.Stopwatch;
 
         private readonly string text = string.Empty;
         private bool success;
