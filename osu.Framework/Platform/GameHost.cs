@@ -38,6 +38,7 @@ using osu.Framework.Imaging;
 using osu.Framework.Input;
 using osu.Framework.Input.Bindings;
 using osu.Framework.Input.Handlers;
+using osu.Framework.IO.Network;
 using osu.Framework.IO.Serialization;
 using osu.Framework.IO.Stores;
 using osu.Framework.Localisation;
@@ -374,12 +375,39 @@ namespace osu.Framework.Platform
         private void unobservedExceptionHandler(object sender, UnobservedTaskExceptionEventArgs args)
         {
             var actualException = args.Exception.AsSingular();
+            var requestFailure = getRequestFailure(args.Exception);
 
-            // unobserved exceptions are logged but left unhandled (most of the time they are not intended to be critical).
-            logException(actualException, "unobserved");
+            if (requestFailure != null)
+            {
+                // A failed request isn't considered an "error" under general scenarios.
+                // However, logging it with low priority is still required.
+                Logger.GetLogger(LoggingTarget.Network)
+                      .Add($"An unobserved request failure occurred for {requestFailure.Url}: {requestFailure.Message}", LogLevel.Verbose, requestFailure);
+
+                args.SetObserved();
+            }
+            else
+            {
+                // unobserved exceptions are logged but left unhandled (most of the time they are not intended to be critical).
+                logException(actualException, "unobserved");
+            }
 
             if (DebugUtils.IsNUnitRunning)
                 abortExecutionFromException(sender, actualException, false);
+        }
+
+        /// <summary>
+        /// Retrieves the failure if every exception surfaced by <paramref name="exception"/> is a <see cref="WebRequestException"/>,
+        /// or <see langword="null"/> if the exception describes anything else.
+        /// </summary>
+        private static WebRequestException getRequestFailure(AggregateException exception)
+        {
+            var flattened = exception.Flatten();
+
+            if (flattened.InnerExceptions.Count == 0 || !flattened.InnerExceptions.All(e => e is WebRequestException))
+                return null;
+
+            return (WebRequestException)flattened.InnerExceptions[0];
         }
 
         private void logException(Exception exception, string type)
