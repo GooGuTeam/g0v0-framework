@@ -1,6 +1,6 @@
 # Native recording and streaming
 
-`recorder.cpp` provides live/offline D3D11 recording. `vulkan_recording.cpp` adds same-adapter Vulkan/D3D11 sharing. `packet_sink.h` delivers encoded H.264/AAC packets to the managed RTMP/RTMPS publisher. See [offline-video-export.md](../../docs/offline-video-export.md) for framework ownership and client integration.
+`recorder.cpp` provides live/offline D3D11 recording. `vulkan_recording.cpp` adds same-adapter Vulkan/D3D11 sharing. `packet_sink.h` delivers encoded H.264/AAC packets to the managed RTMP/RTMPS publisher. See [video-and-capture.md](../../docs/video-and-capture.md) for framework ownership and client integration.
 
 ## Build and deploy
 

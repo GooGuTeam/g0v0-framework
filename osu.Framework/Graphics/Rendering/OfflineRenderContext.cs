@@ -77,6 +77,17 @@ namespace osu.Framework.Graphics.Rendering
         /// Keeps load errors propagating across several <see cref="UpdateScene"/> and <see cref="Render"/> calls,
         /// which otherwise each enter and leave their own suppression scope.
         /// </summary>
+        /// <summary>
+        /// Creates a host that stands in for a live one in the private scene: it exposes this context's renderer and <paramref name="storage"/>,
+        /// and never runs. Cache it as the scene's <see cref="GameHost"/>; it must not outlive this context.
+        /// </summary>
+        public OfflineSceneHost CreateSceneHost(Storage storage)
+        {
+            checkAvailable();
+            ArgumentNullException.ThrowIfNull(storage);
+            return new OfflineSceneHost(renderer, storage);
+        }
+
         public IDisposable SuppressLoadErrorHandling()
         {
             checkAvailable();
@@ -155,4 +166,4 @@ namespace osu.Framework.Graphics.Rendering
                 throw new InvalidOperationException("Export context must be used on its creating thread.");
         }
     }
-}
+}

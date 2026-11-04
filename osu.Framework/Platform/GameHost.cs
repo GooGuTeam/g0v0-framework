@@ -61,7 +61,7 @@ namespace osu.Framework.Platform
         /// </summary>
         protected virtual bool RequireWindowExists => true;
 
-        public IRenderer Renderer { get; private set; }
+        public IRenderer Renderer { get; private protected set; }
 
         public string RendererInfo { get; private set; }
 
@@ -1471,7 +1471,7 @@ namespace osu.Framework.Platform
         /// </summary>
         protected abstract IEnumerable<InputHandler> CreateAvailableInputHandlers();
 
-        public ImmutableArray<InputHandler> AvailableInputHandlers { get; private set; }
+        public ImmutableArray<InputHandler> AvailableInputHandlers { get; private protected set; }
 
         protected virtual TextInputSource CreateTextInput() => new TextInputSource();
 
