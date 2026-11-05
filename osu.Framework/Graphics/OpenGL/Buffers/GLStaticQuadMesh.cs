@@ -15,7 +15,7 @@ namespace osu.Framework.Graphics.OpenGL.Buffers
         where T : unmanaged, IEquatable<T>, IVertex
     {
         private readonly GLRenderer renderer;
-        private readonly List<(int Vao, int Vbo, int Ebo, NativeMemoryTracker.NativeMemoryLease Lease)> chunks = new();
+        private readonly List<(int Vao, int Vbo, int Ebo, NativeMemoryTracker.NativeMemoryLease Lease)> chunks = new List<(int Vao, int Vbo, int Ebo, NativeMemoryTracker.NativeMemoryLease Lease)>();
 
         public unsafe GLStaticQuadMesh(GLRenderer renderer, ReadOnlySpan<T> vertices)
             : base(renderer, vertices.Length)

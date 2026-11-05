@@ -78,7 +78,7 @@ namespace osu.Framework.Tests.Audio
                 float[] samples = new float[1600];
                 for (int i = 0; i < 600; i++)
                 {
-                    System.Array.Fill(samples, 1f);
+                    Array.Fill(samples, 1f);
                     mixer.Read(samples, 800);
                     Assert.That(samples, Is.All.Zero);
                 }

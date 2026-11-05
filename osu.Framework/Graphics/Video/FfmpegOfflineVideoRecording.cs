@@ -52,10 +52,10 @@ namespace osu.Framework.Graphics.Video
         private readonly BlockingCollection<byte[]> filledBuffers = new BlockingCollection<byte[]>(pipe_buffers);
         private FileStream? audioFile;
         private Process? encoder;
-        private Task<string>? stderrTail;
-        private Thread? pipeWriter;
+        private readonly Task<string>? stderrTail;
+        private readonly Thread? pipeWriter;
         private Exception? pipeFailure;
-        private CancellationTokenRegistration cancellationRegistration;
+        private readonly CancellationTokenRegistration cancellationRegistration;
         private bool completed;
         private bool disposed;
         private bool faulted;
@@ -65,7 +65,7 @@ namespace osu.Framework.Graphics.Video
         public int AudioFramesPerVideoFrame => 48000 / options.FrameRate;
 
         public FfmpegOfflineVideoRecording(OfflineRenderContext context, string path, VideoRecordingOptions options,
-                                          string executable, CancellationToken cancellationToken)
+                                           string executable, CancellationToken cancellationToken)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(executable);
             this.options = options;
@@ -77,12 +77,15 @@ namespace osu.Framework.Graphics.Video
                 throw new ArgumentException(@"FFmpeg export requires an MP4 destination.", nameof(path));
             if (File.Exists(destination))
                 throw new IOException(@"The export destination already exists.");
+
             videoPath = destination + $@".{Guid.NewGuid():N}.video.mp4";
             audioPath = destination + $@".{Guid.NewGuid():N}.audio.f32";
             audioBytes = new byte[AudioFramesPerVideoFrame * 2 * sizeof(float)];
+
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
                 for (int i = 0; i < readback_depth; i++)
                 {
                     staging[i] = device.ResourceFactory.CreateTexture(TextureDescription.Texture2D((uint)options.Width, (uint)options.Height,
@@ -105,13 +108,17 @@ namespace osu.Framework.Graphics.Video
                 encoder = Process.Start(info) ?? throw new InvalidOperationException(@"Unable to start FFmpeg.");
                 stderrTail = readTailAsync(encoder.StandardError);
                 cancellationRegistration = cancellationToken.Register(() => kill(encoder));
-                pipeWriter = new Thread(() => writePipe(encoder.StandardInput.BaseStream)) { IsBackground = true, Name = @"FFmpeg video pipe" };
+                pipeWriter = new Thread(() => writePipe(encoder.StandardInput.BaseStream))
+                {
+                    IsBackground = true, Name = @"FFmpeg video pipe"
+                };
                 pipeWriter.Start();
             }
             catch
             {
                 try { Dispose(); }
                 catch (Exception) { }
+
                 throw;
             }
         }
@@ -122,10 +129,15 @@ namespace osu.Framework.Graphics.Video
             ObjectDisposedException.ThrowIf(disposed, this);
             if (completed || faulted)
                 throw new InvalidOperationException(@"The FFmpeg export cannot accept further frames.");
+
             cancellationToken.ThrowIfCancellationRequested();
-            if (texture.Width != options.Width || texture.Height != options.Height || texture.Format != PixelFormat.R8G8B8A8UNorm
-                || texture.SampleCount != TextureSampleCount.Count1 || audio.Length * sizeof(float) != audioBytes.Length)
+            if (texture.Width != options.Width
+                || texture.Height != options.Height
+                || texture.Format != PixelFormat.R8G8B8A8UNorm
+                || texture.SampleCount != TextureSampleCount.Count1
+                || audio.Length * sizeof(float) != audioBytes.Length)
                 throw new ArgumentException(@"Video and audio must match the configured export format.");
+
             try
             {
                 // Slots are used in submission order; the loop below always frees the one used next.
@@ -160,9 +172,12 @@ namespace osu.Framework.Graphics.Video
             checkThread();
             ObjectDisposedException.ThrowIf(disposed, this);
             if (completed) return;
+
             if (faulted || WrittenFrames == 0)
                 throw new InvalidOperationException(@"Cannot finalise an empty or failed export.");
+
             cancellationToken.ThrowIfCancellationRequested();
+
             try
             {
                 while (pendingReadbacks.Count > 0)
@@ -170,6 +185,7 @@ namespace osu.Framework.Graphics.Video
                 filledBuffers.CompleteAdding();
                 if (!pipeWriter!.Join(pipe_timeout))
                     throw new TimeoutException(@"FFmpeg stopped accepting video frames.");
+
                 throwIfPipeFailed();
                 encoder!.StandardInput.Close();
                 waitForExit(encoder, stderrTail!);
@@ -205,13 +221,16 @@ namespace osu.Framework.Graphics.Video
         {
             if (!device.WaitForFence(fences[slot]!, 10000000000UL))
                 throw new TimeoutException(@"GPU readback timed out.");
+
             device.ResetFence(fences[slot]!);
 
             byte[] pixels = takeFreeBuffer();
             var mapped = device.Map(staging[slot]!, MapMode.Read);
+
             try
             {
                 int rowBytes = options.Width * 4;
+
                 if (device.IsUvOriginTopLeft && mapped.RowPitch == rowBytes)
                     Marshal.Copy(mapped.Data, pixels, 0, pixels.Length);
                 else
@@ -225,12 +244,12 @@ namespace osu.Framework.Graphics.Video
             }
             catch
             {
-                freeBuffers.Add(pixels);
+                freeBuffers.Add(pixels, cancellationToken);
                 throw;
             }
             finally { device.Unmap(staging[slot]!); }
 
-            filledBuffers.Add(pixels);
+            filledBuffers.Add(pixels, cancellationToken);
         }
 
         private byte[] takeFreeBuffer()
@@ -243,6 +262,7 @@ namespace osu.Framework.Graphics.Video
                 cancellationToken.ThrowIfCancellationRequested();
                 if (freeBuffers.TryTake(out byte[]? buffer, 100))
                     return buffer;
+
                 if (deadline.Elapsed > pipe_timeout)
                 {
                     kill(encoder);
@@ -258,7 +278,7 @@ namespace osu.Framework.Graphics.Video
                 foreach (byte[] buffer in filledBuffers.GetConsumingEnumerable())
                 {
                     input.Write(buffer);
-                    freeBuffers.Add(buffer);
+                    freeBuffers.Add(buffer, cancellationToken);
                 }
             }
             catch (Exception ex)
@@ -285,10 +305,7 @@ namespace osu.Framework.Graphics.Video
         {
             var info = new ProcessStartInfo(executable)
             {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardInput = true,
-                RedirectStandardError = true,
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardError = true,
             };
             add(info, @"-nostdin", @"-hide_banner", @"-loglevel", @"error", @"-n");
             return info;
@@ -298,6 +315,7 @@ namespace osu.Framework.Graphics.Video
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromMinutes(5));
+
             try
             {
                 process.WaitForExitAsync(timeout.Token).GetAwaiter().GetResult();
@@ -352,7 +370,10 @@ namespace osu.Framework.Graphics.Video
 
         private static void kill(Process? process)
         {
-            try { if (process != null && !process.HasExited) process.Kill(entireProcessTree: true); }
+            try
+            {
+                if (process != null && !process.HasExited) process.Kill(entireProcessTree: true);
+            }
             catch (InvalidOperationException) { }
             catch (System.ComponentModel.Win32Exception) { }
         }
@@ -361,9 +382,11 @@ namespace osu.Framework.Graphics.Video
         {
             checkThread();
             if (disposed) return;
+
             disposed = true;
             cancellationRegistration.Dispose();
             filledBuffers.CompleteAdding();
+
             if (encoder != null)
             {
                 // Killing FFmpeg breaks the pipe, which ends a writer blocked on it.
@@ -373,6 +396,7 @@ namespace osu.Framework.Graphics.Video
                 encoder.Dispose();
                 encoder = null;
             }
+
             try
             {
                 audioFile?.Dispose();
@@ -386,11 +410,15 @@ namespace osu.Framework.Graphics.Video
                     commands[i]?.Dispose();
                     staging[i]?.Dispose();
                 }
+
                 try { File.Delete(videoPath); }
                 finally
                 {
                     try { File.Delete(audioPath); }
-                    finally { if (!completed) File.Delete(destination); }
+                    finally
+                    {
+                        if (!completed) File.Delete(destination);
+                    }
                 }
             }
         }

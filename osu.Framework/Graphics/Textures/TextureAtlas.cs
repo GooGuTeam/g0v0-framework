@@ -1,4 +1,4 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
 // See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
@@ -26,7 +26,7 @@ namespace osu.Framework.Graphics.Textures
         private readonly List<RectangleI> subTextureBounds = new List<RectangleI>();
         private IAtlasPacker? freeRectanglePacker;
         private readonly AtlasPackingStrategy packingStrategy;
-        private readonly List<(WeakReference<BackingAtlasTexture> Texture, IAtlasPacker Packer)> previousPages = new();
+        private readonly List<(WeakReference<BackingAtlasTexture> Texture, IAtlasPacker Packer)> previousPages = new List<(WeakReference<BackingAtlasTexture> Texture, IAtlasPacker Packer)>();
         private BackingAtlasTexture? atlasTexture;
 
         private readonly IRenderer renderer;
@@ -53,9 +53,9 @@ namespace osu.Framework.Graphics.Textures
 
         private readonly bool manualMipmaps;
         private readonly TextureFilteringMode filteringMode;
-        private readonly osu.Framework.Graphics.Rendering.TexturePixelFormat textureFormat;
+        private readonly TexturePixelFormat textureFormat;
 
-        public osu.Framework.Graphics.Rendering.TexturePixelFormat TextureFormat => textureFormat;
+        public TexturePixelFormat TextureFormat => textureFormat;
         private readonly Lock textureRetrievalLock = new Lock();
 
         public TextureAtlas(IRenderer renderer, int width, int height, bool manualMipmaps = false, TextureFilteringMode filteringMode = TextureFilteringMode.Linear)
@@ -71,7 +71,7 @@ namespace osu.Framework.Graphics.Textures
         /// <summary>Creates an atlas with an explicit allocation policy, without relocating existing regions.</summary>
         public TextureAtlas(IRenderer renderer, int width, int height, AtlasPackingStrategy packingStrategy, bool manualMipmaps = false,
                             TextureFilteringMode filteringMode = TextureFilteringMode.Linear,
-                            osu.Framework.Graphics.Rendering.TexturePixelFormat textureFormat = osu.Framework.Graphics.Rendering.TexturePixelFormat.R8G8B8A8Float)
+                            TexturePixelFormat textureFormat = TexturePixelFormat.R8G8B8A8Float)
         {
             this.renderer = renderer;
             atlasWidth = width;
@@ -120,7 +120,7 @@ namespace osu.Framework.Graphics.Textures
             // We pass PADDING/2 as opposed to PADDING such that the padded region of each individual texture
             // occupies half of the padded space.
             atlasTexture = new BackingAtlasTexture(renderer, atlasWidth, atlasHeight, manualMipmaps, filteringMode,
-                textureFormat == osu.Framework.Graphics.Rendering.TexturePixelFormat.R8Float ? 0 : PADDING / 2, textureFormat);
+                textureFormat == TexturePixelFormat.R8Float ? 0 : PADDING / 2, textureFormat);
 
             RectangleI bounds = new RectangleI(0, 0, WHITE_PIXEL_SIZE, WHITE_PIXEL_SIZE);
             if (freeRectanglePacker == null)
@@ -128,7 +128,7 @@ namespace osu.Framework.Graphics.Textures
 
             using (var whiteTex = new TextureRegion(atlasTexture, bounds, WrapMode.Repeat, WrapMode.Repeat))
             {
-                if (textureFormat == osu.Framework.Graphics.Rendering.TexturePixelFormat.R8Float)
+                if (textureFormat == TexturePixelFormat.R8Float)
                     whiteTex.SetData(new AlphaTextureUpload(1, 1, new byte[] { 255 }));
                 else
                     // Generate white padding as if the white texture was wrapped, even though it isn't

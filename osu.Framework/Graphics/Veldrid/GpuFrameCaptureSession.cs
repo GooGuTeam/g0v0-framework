@@ -20,8 +20,10 @@ namespace osu.Framework.Graphics.Veldrid
         public long DroppedFrames { get; private set; }
         public bool IsDisposed { get; private set; }
         public bool Paused { get; set; }
+
         /// <summary>Minimum Stopwatch ticks between GPU copies. Zero captures every presented frame.</summary>
         public long MinimumFrameInterval { get; set; }
+
         private long nextCopy;
         public event Action? FrameAvailable;
 
@@ -49,10 +51,12 @@ namespace osu.Framework.Graphics.Veldrid
             FrameAvailable?.Invoke();
             if (Paused || IsDisposed)
                 return;
+
             long frameIndex = sequence++;
             long timestamp = Stopwatch.GetTimestamp();
             if (timestamp < nextCopy)
                 return;
+
             // Keep a fixed cadence rather than adding an interval to each actual
             // render timestamp (which can halve capture rate with vsync jitter).
             nextCopy = MinimumFrameInterval > 0
@@ -116,6 +120,7 @@ namespace osu.Framework.Graphics.Veldrid
             ensureDrawThread();
             if (IsDisposed)
                 return;
+
             if (slots.Any(s => s.Leased))
                 throw new InvalidOperationException("Return all encoder frame leases before stopping capture.");
 

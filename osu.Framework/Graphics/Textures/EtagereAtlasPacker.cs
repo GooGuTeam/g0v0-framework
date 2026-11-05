@@ -32,6 +32,7 @@ namespace osu.Framework.Graphics.Textures
 
             int selected = -1;
             int selectedHeight = int.MaxValue;
+
             for (int i = 0; i < shelves.Count; i++)
             {
                 Shelf shelf = shelves[i];
@@ -41,6 +42,7 @@ namespace osu.Framework.Graphics.Textures
                 bool badFit = !shelf.Empty && shelf.Height > height + height / 2;
                 if (badFit && selected >= 0)
                     continue;
+
                 selected = i;
                 if (!badFit)
                     selectedHeight = shelf.Height;
@@ -55,11 +57,13 @@ namespace osu.Framework.Graphics.Textures
             }
 
             Shelf chosen = shelves[selected];
+
             if (chosen.Empty && chosen.Height > height + 8)
             {
                 shelves.Insert(selected + 1, new Shelf(bounds.X, chosen.Y + height, chosen.Height - height, true));
                 chosen.Height = height;
             }
+
             position = new Vector2I(chosen.X, chosen.Y);
             chosen.X += width;
             if (bounds.Right - chosen.X <= 8)

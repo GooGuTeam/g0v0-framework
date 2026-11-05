@@ -57,17 +57,19 @@ namespace osu.Framework.Audio
         /// The thread audio operations (mainly Bass calls) are ran on.
         /// </summary>
         private readonly AudioThread thread;
+
         private readonly BassAudioMixer offlineMaster;
-        internal readonly osu.Framework.Audio.Callbacks.MixerAudioCaptureHub CaptureHub = new osu.Framework.Audio.Callbacks.MixerAudioCaptureHub();
+        internal readonly Callbacks.MixerAudioCaptureHub CaptureHub = new Callbacks.MixerAudioCaptureHub();
 
         /// <summary>
         /// Starts single-consumer capture of this manager's live mixers. The capture survives
         /// output-device changes; unavailable audio is represented by silence.
         /// </summary>
-        public osu.Framework.Audio.Callbacks.MixerAudioCapture BeginCapture(long startTimestamp)
+        public Callbacks.MixerAudioCapture BeginCapture(long startTimestamp)
         {
             if (offlineMaster != null)
-                throw new InvalidOperationException(@"Use the private offline mixer for replay audio.");
+                throw new InvalidOperationException("Use the private offline mixer for replay audio.");
+
             ObjectDisposedException.ThrowIf(cancelSource.IsCancellationRequested, this);
             return CaptureHub.Begin(startTimestamp);
         }
@@ -113,20 +115,22 @@ namespace osu.Framework.Audio
         public readonly Bindable<string> AudioDevice = new Bindable<string>();
 
         /// <summary>
-        /// Whether to use experimental WASAPI initialisation on windows.
+        /// Whether to use experimental WASAPI initialisation on Windows.
         /// This generally results in lower audio latency, but also changes the audio synchronisation from
         /// historical expectations, meaning users / application will have to account for different offsets.
         /// </summary>
         public readonly BindableBool UseWasapi = new BindableBool();
 
-        public readonly BindableBool WasapiIsExclusive = new();
-        public readonly BindableBool WasapiAutoSharedOnBackground = new();
-        // BASS accpets a float but let us use double here to avoid fp issues.
-        public readonly BindableDouble WasapiBufferMilliseconds = new();
-        public readonly BindableDouble WasapiPeriodMilliseconds = new();
-        public readonly BindableBool WasapiUseSamples = new();
-        public readonly BindableInt WasapiBufferSamples = new() { MinValue = 0, MaxValue = 192000 };
-        public readonly BindableInt WasapiPeriodSamples = new() { MinValue = 0, MaxValue = 192000 };
+        public readonly BindableBool WasapiIsExclusive = new BindableBool();
+
+        public readonly BindableBool WasapiAutoSharedOnBackground = new BindableBool();
+
+        // BASS accepts a float but let us use double here to avoid fp issues.
+        public readonly BindableDouble WasapiBufferMilliseconds = new BindableDouble();
+        public readonly BindableDouble WasapiPeriodMilliseconds = new BindableDouble();
+        public readonly BindableBool WasapiUseSamples = new BindableBool();
+        public readonly BindableInt WasapiBufferSamples = new BindableInt { MinValue = 0, MaxValue = 192000 };
+        public readonly BindableInt WasapiPeriodSamples = new BindableInt { MinValue = 0, MaxValue = 192000 };
 
         /// <summary>
         /// Estimated WASAPI buffer latency in milliseconds, or null when WASAPI is not active.
@@ -176,9 +180,8 @@ namespace osu.Framework.Audio
         /// </remarks>
         internal readonly IBindable<int?> GlobalMixerHandle = new Bindable<int?>();
 
-        public override bool IsLoaded => base.IsLoaded &&
-                                         // bass default device is a null device (-1), not the actual system default.
-                                         Bass.CurrentDevice != Bass.DefaultDevice;
+        // bass default device is a null device (-1), not the actual system default.
+        public override bool IsLoaded => base.IsLoaded && Bass.CurrentDevice != Bass.DefaultDevice;
 
         // Mutated by multiple threads, must be thread safe.
         private ImmutableArray<DeviceInfo> audioDevices = ImmutableArray<DeviceInfo>.Empty;
@@ -357,11 +360,13 @@ namespace osu.Framework.Audio
         {
             var mixer = new BassAudioMixer(this, fallbackMixer, identifier, offline: offlineMaster != null);
             AddItem(mixer);
+
             if (offlineMaster != null)
             {
                 if (!BassMix.MixerAddChannel(offlineMaster.Handle, mixer.Handle, BassFlags.MixerChanNoRampin))
                     throw new InvalidOperationException($@"Unable to attach private audio mixer: {Bass.LastError}");
             }
+
             return mixer;
         }
 

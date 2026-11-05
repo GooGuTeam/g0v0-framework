@@ -9,7 +9,7 @@ namespace osu.Framework.Audio.Callbacks
 {
     internal sealed class MixerAudioCaptureHub
     {
-        private readonly object sync = new object();
+        private readonly Lock sync = new Lock();
         private MixerAudioCapture? current;
         private MixerAudioCaptureSource[] sources = Array.Empty<MixerAudioCaptureSource>();
 
@@ -22,6 +22,7 @@ namespace osu.Framework.Audio.Callbacks
             {
                 if (current != null)
                     throw new InvalidOperationException(@"An audio capture is already active.");
+
                 var capture = new MixerAudioCapture(this, timestamp);
                 Volatile.Write(ref current, capture);
                 return capture;
@@ -47,6 +48,7 @@ namespace osu.Framework.Audio.Callbacks
                 // Bound the memory footprint even with custom rulesets creating many mixers.
                 if (sources.Length >= 64)
                     throw new InvalidOperationException(@"The audio capture mixer limit was reached.");
+
                 var source = new MixerAudioCaptureSource(this);
                 var updated = new MixerAudioCaptureSource[sources.Length + 1];
                 sources.CopyTo(updated, 0);
@@ -59,6 +61,7 @@ namespace osu.Framework.Audio.Callbacks
         public void RemoveSource(MixerAudioCaptureSource source)
         {
             source.Retire();
+
             lock (sync)
             {
                 // Keep queued audio across device restart until the encoder has consumed it.

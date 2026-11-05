@@ -1,5 +1,6 @@
 // Copyright (c) GooGuTeam. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
+
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -12,7 +13,9 @@ namespace osu.Framework.Imaging
         public abstract int Width { get; }
         public abstract int Height { get; }
         public System.Drawing.Size Size => new System.Drawing.Size(Width, Height);
+
         public abstract Image<T> CloneAs<T>() where T : unmanaged, IPixel<T>;
+
         public abstract void Dispose();
 
         public static Image<T> Load<T>(Stream stream) where T : unmanaged, IPixel<T>
@@ -29,12 +32,15 @@ namespace osu.Framework.Imaging
             using var buffer = new MemoryStream((int)remaining);
             byte[] chunk = new byte[65536];
             int read;
+
             while ((read = stream.Read(chunk)) != 0)
             {
                 if (buffer.Length + read > NativeImageCodec.MAXIMUM_BYTES)
                     throw new InvalidDataException("Image input exceeds the supported size.");
+
                 buffer.Write(chunk, 0, read);
             }
+
             return Load<T>(buffer.GetBuffer().AsSpan(0, (int)buffer.Length));
         }
 
@@ -60,8 +66,17 @@ namespace osu.Framework.Imaging
         public static Image<T> LoadPixelData<T>(ReadOnlySpan<T> data, int width, int height) where T : unmanaged, IPixel<T>
         {
             var result = new Image<T>(width, height);
-            try { data.Slice(0, checked(width * height)).CopyTo(result.Pixels); return result; }
-            catch { result.Dispose(); throw; }
+
+            try
+            {
+                data.Slice(0, checked(width * height)).CopyTo(result.Pixels);
+                return result;
+            }
+            catch
+            {
+                result.Dispose();
+                throw;
+            }
         }
 
         public static Image<T> LoadPixelData<T>(ReadOnlySpan<byte> data, int width, int height) where T : unmanaged, IPixel<T>
@@ -71,13 +86,16 @@ namespace osu.Framework.Imaging
         {
             if (this is Image<Rgba32> direct)
                 return NativeImageCodec.Encode(direct.Pixels, Width, Height, format, quality);
+
             using var rgba = CloneAs<Rgba32>();
             return NativeImageCodec.Encode(rgba.Pixels, Width, Height, format, quality);
         }
 
         public void SaveAsPng(Stream stream) => stream.Write(encode(0, 90));
         public void SaveAsBmp(Stream stream) => stream.Write(encode(2, 90));
+
         public Task SaveAsPngAsync(Stream stream) => stream.WriteAsync(encode(0, 90)).AsTask();
+
         public Task SaveAsJpegAsync(Stream stream, int quality = 90) => stream.WriteAsync(encode(1, quality)).AsTask();
     }
 
@@ -88,13 +106,23 @@ namespace osu.Framework.Imaging
         private int height;
         public override int Width => width;
         public override int Height => height;
+
         public Span<T> Pixels
         {
-            get { ObjectDisposedException.ThrowIf(pixels == null, this); return pixels; }
+            get
+            {
+                ObjectDisposedException.ThrowIf(pixels == null, this);
+                return pixels;
+            }
         }
 
-        public Image(int width, int height) : this(width, height, new T[ValidateDimensions(width, height)]) { }
-        public Image(int width, int height, T colour) : this(width, height)
+        public Image(int width, int height)
+            : this(width, height, new T[ValidateDimensions(width, height)])
+        {
+        }
+
+        public Image(int width, int height, T colour)
+            : this(width, height)
         {
             Pixels.Fill(colour);
         }
@@ -110,6 +138,7 @@ namespace osu.Framework.Imaging
         {
             if (ownedPixels.Length != ValidateDimensions(width, height))
                 throw new ArgumentException("Pixel buffer does not match image dimensions.", nameof(ownedPixels));
+
             return new Image<T>(width, height, ownedPixels);
         }
 
@@ -117,13 +146,22 @@ namespace osu.Framework.Imaging
         {
             if (width <= 0 || height <= 0 || width > 32768 || height > 32768 || (long)width * height * Marshal.SizeOf<T>() > NativeImageCodec.MAXIMUM_BYTES)
                 throw new ArgumentOutOfRangeException(nameof(width), "Image exceeds the pixel budget.");
+
             return checked(width * height);
         }
 
         public T this[int x, int y]
         {
-            get { checkCoordinates(x, y); return Pixels[y * Width + x]; }
-            set { checkCoordinates(x, y); Pixels[y * Width + x] = value; }
+            get
+            {
+                checkCoordinates(x, y);
+                return Pixels[y * Width + x];
+            }
+            set
+            {
+                checkCoordinates(x, y);
+                Pixels[y * Width + x] = value;
+            }
         }
 
         private void checkCoordinates(int x, int y)
@@ -135,13 +173,15 @@ namespace osu.Framework.Imaging
         {
             ObjectDisposedException.ThrowIf(pixels == null, this);
             if ((uint)row >= Height) throw new ArgumentOutOfRangeException(nameof(row));
+
             return pixels.AsMemory(row * Width, Width);
         }
 
         public bool DangerousTryGetSinglePixelMemory(out Memory<T> memory)
         {
             ObjectDisposedException.ThrowIf(pixels == null, this);
-            memory = pixels.AsMemory(); return true;
+            memory = pixels.AsMemory();
+            return true;
         }
 
         public Image<T> Clone() => CloneAs<T>();
@@ -151,17 +191,20 @@ namespace osu.Framework.Imaging
             var result = new Image<TPixel>(Width, Height);
             var source = Pixels;
             var destination = result.Pixels;
+
             if (typeof(T) == typeof(TPixel))
             {
                 MemoryMarshal.Cast<T, TPixel>(source).CopyTo(destination);
                 return result;
             }
+
             for (int i = 0; i < source.Length; i++)
             {
                 TPixel pixel = default;
                 pixel.FromRgba32(source[i].ToRgba32());
                 destination[i] = pixel;
             }
+
             return result;
         }
 
@@ -170,10 +213,14 @@ namespace osu.Framework.Imaging
             ObjectDisposedException.ThrowIf(pixels == null, this);
             if (replacement.Length != ValidateDimensions(newWidth, newHeight))
                 throw new ArgumentException("Pixel buffer does not match image dimensions.", nameof(replacement));
-            pixels = replacement; width = newWidth; height = newHeight;
+
+            pixels = replacement;
+            width = newWidth;
+            height = newHeight;
         }
 
         public void Mutate(Action<ImageProcessingContext<T>> action) => action(new ImageProcessingContext<T>(this));
+
         public override void Dispose() => pixels = null;
     }
 }

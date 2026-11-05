@@ -61,6 +61,7 @@ namespace osu.Framework.Graphics.Rendering
                 return atlas;
             }
         }
+
         internal AtlasPackingStrategy FontAtlasPacking { get; set; } = AtlasPackingStrategy.FreeRectangles;
         internal bool LowResolutionFonts { get; set; }
         internal bool SingleChannelFontAtlas { get; set; }
@@ -82,7 +83,10 @@ namespace osu.Framework.Graphics.Rendering
         /// <summary>
         /// Texture sizes tried by <see cref="ProbeTextureSizes"/>, in order. Sizes above the last are not probed.
         /// </summary>
-        private static readonly int[] probed_texture_sizes = { 2048, 4096, 8192 };
+        private static readonly int[] probed_texture_sizes =
+        {
+            2048, 4096, 8192
+        };
 
         private const int default_font_atlas_size = 4096;
         private const int max_single_channel_font_atlas_size = 8192;
@@ -183,6 +187,7 @@ namespace osu.Framework.Graphics.Rendering
         {
             if (GraphicsProbeCache == null || !ProbeBindlessTextures)
                 return;
+
             try
             {
                 BindlessTextureSupport = GraphicsProbeCache.GetOrProbe($"{GetType().Name}|{fingerprint}", probe);
@@ -191,8 +196,10 @@ namespace osu.Framework.Graphics.Rendering
             {
                 BindlessTextureSupport = new BindlessTextureProbeResult(BindlessTextureProbeStatus.Failed, e.Message);
             }
+
             Logging.Logger.Log($"Bindless texture probe: {BindlessTextureSupport.Status}. {BindlessTextureSupport.Details}");
         }
+
         internal Configuration.PresentationPreference PresentationPreference { get; set; }
         internal Configuration.VulkanPresentationPreference VulkanPresentationPreference { get; set; }
         internal bool RequestVulkanExclusiveFullscreen { get; set; }
@@ -325,11 +332,6 @@ namespace osu.Framework.Graphics.Rendering
         /// resource layouts unset, which Vulkan cannot create a pipeline from.
         /// </summary>
         internal bool UsesTextureSlotShaders => TextureSlotsEnabled && BindsTextureSlots;
-
-        /// <summary>
-        /// Whether the bound shader is a default texture shader (see <see cref="defaultTextureShaders"/>), cached since vertices consult it.
-        /// </summary>
-        private bool defaultTextureShaderActive;
 
         /// <summary>
         /// The unit holding the texture that vertices added now sample. Always 0 unless the default texture shader is bound.
@@ -506,7 +508,7 @@ namespace osu.Framework.Graphics.Rendering
 
             Shader?.Unbind();
             Shader = null;
-            defaultTextureShaderActive = false;
+            isDefaultTextureShaderBound = false;
             currentTextureSlot = 0;
             textureSlotsUsedInBatch = 0;
 
@@ -1160,7 +1162,10 @@ namespace osu.Framework.Graphics.Rendering
         /// </summary>
         private readonly ConditionalWeakTable<IShader, object?> defaultTextureShaders = new ConditionalWeakTable<IShader, object?>();
 
-        private bool isDefaultTextureShaderBound => defaultTextureShaderActive;
+        /// <summary>
+        /// Whether the bound shader is a default texture shader (see <see cref="defaultTextureShaders"/>), cached since vertices consult it.
+        /// </summary>
+        private bool isDefaultTextureShaderBound { get; set; }
 
         private bool retainAppliedMaskingForQuad;
 
@@ -1471,7 +1476,7 @@ namespace osu.Framework.Graphics.Rendering
         /// <returns>Whether the texture was successfully bound.</returns>
         public bool BindTexture(INativeTexture texture, int unit = 0, WrapMode wrapModeS = WrapMode.None, WrapMode wrapModeT = WrapMode.None)
         {
-            if (unit == 0 && defaultTextureShaderActive && TextureSlotsEnabled && BindsTextureSlots)
+            if (unit == 0 && isDefaultTextureShaderBound && TextureSlotsEnabled && BindsTextureSlots)
                 return bindTextureSlot(texture, wrapModeS, wrapModeT);
 
             if (lastActiveTextureUnit == unit && lastBoundTexture[unit] == texture)
@@ -1747,8 +1752,10 @@ namespace osu.Framework.Graphics.Rendering
         internal bool CanDrawUntextured(Texture texture)
             => UntexturedWhitePixel
                && texture is TextureWhitePixel
-               && texture.WrapModeS == WrapMode.None && texture.WrapModeT == WrapMode.None
-               && textureBoundForCurrentFrameBuffer && lastBoundTexture[0] != null
+               && texture.WrapModeS == WrapMode.None
+               && texture.WrapModeT == WrapMode.None
+               && textureBoundForCurrentFrameBuffer
+               && lastBoundTexture[0] != null
                && isDefaultTextureShaderBound;
 
         /// <summary>
@@ -1792,7 +1799,7 @@ namespace osu.Framework.Graphics.Rendering
                 throw new InvalidOperationException("No shader bound.");
 
             // The default texture shader declares every slot, so each needs a texture attached, even with slots disabled.
-            if (defaultTextureShaderActive)
+            if (isDefaultTextureShaderBound)
                 fillEmptyTextureSlots();
 
             if (globalUniformsChanged)
@@ -1864,7 +1871,7 @@ namespace osu.Framework.Graphics.Rendering
                 SetUniformBufferImplementation(masking_buffer_name, boundMaskingBuffer);
             }
 
-            if (defaultTextureShaderActive)
+            if (isDefaultTextureShaderBound)
             {
                 BeginTextureSlotDraw();
                 DrawVerticesImplementation(topology, vertexStart, verticesCount);
@@ -1926,8 +1933,8 @@ namespace osu.Framework.Graphics.Rendering
                 Shader = shader;
 
                 // Other shaders sample unit 0 only.
-                defaultTextureShaderActive = defaultTextureShaders.TryGetValue(shader, out _);
-                if (!defaultTextureShaderActive)
+                isDefaultTextureShaderBound = defaultTextureShaders.TryGetValue(shader, out _);
+                if (!isDefaultTextureShaderBound)
                     currentTextureSlot = 0;
             }
         }
@@ -1970,7 +1977,8 @@ namespace osu.Framework.Graphics.Rendering
 
         #region Factory
 
-        public abstract IFrameBuffer CreateFrameBuffer(TexturePixelFormat textureFormat = TexturePixelFormat.R8G8B8A8Float, RenderBufferFormat[]? renderBufferFormats = null, TextureFilteringMode filteringMode = TextureFilteringMode.Linear);
+        public abstract IFrameBuffer CreateFrameBuffer(TexturePixelFormat textureFormat = TexturePixelFormat.R8G8B8A8Float, RenderBufferFormat[]? renderBufferFormats = null,
+                                                       TextureFilteringMode filteringMode = TextureFilteringMode.Linear);
 
         /// <inheritdoc cref="IRenderer.CreateShaderPart"/>
         protected abstract IShaderPart CreateShaderPart(IShaderStore store, string name, byte[]? rawData, ShaderPartType partType);
@@ -2105,20 +2113,35 @@ namespace osu.Framework.Graphics.Rendering
         }
 
         IVertexBatch<TexturedVertex2D> IRenderer.DefaultQuadBatch => DefaultQuadBatch;
+
         void IRenderer.BeginFrame(Vector2 windowSize) => BeginFrame(windowSize);
+
         void IRenderer.FinishFrame() => FinishFrame();
+
         void IRenderer.FlushCurrentBatch(FlushBatchSource? source) => FlushCurrentBatch(source);
+
         void IRenderer.SwapBuffers() => SwapBuffers();
+
         void IRenderer.WaitUntilIdle() => WaitUntilIdle();
+
         void IRenderer.WaitUntilNextFrameReady() => WaitUntilNextFrameReady();
+
         void IRenderer.MakeCurrent() => MakeCurrent();
+
         void IRenderer.ClearCurrent() => ClearCurrent();
+
         void IRenderer.SetUniform<T>(IUniformWithValue<T> uniform) => SetUniform(uniform);
+
         void IRenderer.PushQuadBatch(IVertexBatch<TexturedVertex2D> quadBatch) => PushQuadBatch(quadBatch);
+
         void IRenderer.PopQuadBatch() => PopQuadBatch();
+
         Image<Rgba32> IRenderer.TakeScreenshot() => TakeScreenshot();
+
         Image<Rgba32>? IRenderer.ExtractFrameBufferData(IFrameBuffer frameBuffer) => ExtractFrameBufferData(frameBuffer);
+
         IShaderPart IRenderer.CreateShaderPart(IShaderStore store, string name, byte[]? rawData, ShaderPartType partType) => CreateShaderPart(store, name, rawData, partType);
+
         IShader IRenderer.CreateShader(string name, IShaderPart[] parts)
         {
             IShader shader = CreateShader(name, parts, shaderCompilationStore);

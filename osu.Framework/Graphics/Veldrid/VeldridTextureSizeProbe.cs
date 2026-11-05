@@ -29,9 +29,9 @@ namespace osu.Framework.Graphics.Veldrid
         private static bool tryAllocate(GraphicsDevice device, int size, TexturePixelFormat format)
         {
             var factory = device.ResourceFactory;
-            var pixelFormat = format == TexturePixelFormat.R8Float ? global::Veldrid.PixelFormat.R8UNorm : global::Veldrid.PixelFormat.R8G8B8A8UNorm;
+            var pixelFormat = format == TexturePixelFormat.R8Float ? PixelFormat.R8UNorm : PixelFormat.R8G8B8A8UNorm;
 
-            global::Veldrid.Texture? texture = null;
+            Texture? texture = null;
             Framebuffer? framebuffer = null;
             CommandList? commands = null;
 

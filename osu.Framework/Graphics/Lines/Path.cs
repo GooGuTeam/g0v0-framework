@@ -86,8 +86,10 @@ namespace osu.Framework.Graphics.Lines
             get => drawRange;
             set
             {
-                if (value is { } range && (range.FirstVertex < 0 || range.VertexCount < 0
-                    || range.FirstVertex > vertices.Count - range.VertexCount))
+                if (value is { } range
+                    && (range.FirstVertex < 0
+                        || range.VertexCount < 0
+                        || range.FirstVertex > vertices.Count - range.VertexCount))
                     throw new ArgumentOutOfRangeException(nameof(value));
 
                 if (drawRange == value)
@@ -251,11 +253,13 @@ namespace osu.Framework.Graphics.Lines
             {
                 Vector2 offset = vertexBounds.TopLeft;
                 Vector2 previous = range.StartPoint - offset;
+
                 for (int i = range.FirstVertex; i < range.FirstVertex + range.VertexCount; i++)
                 {
                     Vector2 next = vertices[i] - offset;
                     if (new Line(previous, next).DistanceSquaredToPoint(localPos) <= pathRadiusSquared)
                         return true;
+
                     previous = next;
                 }
 

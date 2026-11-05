@@ -33,7 +33,7 @@ namespace osu.Framework.Graphics.Textures
             private static readonly Color4 initialisation_colour = default;
 
             public BackingAtlasTexture(IRenderer renderer, int width, int height, bool manualMipmaps, TextureFilteringMode filteringMode = TextureFilteringMode.Linear, int padding = 0,
-                                       osu.Framework.Graphics.Rendering.TexturePixelFormat textureFormat = osu.Framework.Graphics.Rendering.TexturePixelFormat.R8G8B8A8Float)
+                                       TexturePixelFormat textureFormat = TexturePixelFormat.R8G8B8A8Float)
                 : this(renderer.CreateTexture(width, height, manualMipmaps, filteringMode, WrapMode.None, WrapMode.None, initialisation_colour, textureFormat))
             {
                 this.padding = padding;
@@ -49,13 +49,13 @@ namespace osu.Framework.Graphics.Textures
 
             internal override void SetData(ITextureUpload upload, WrapMode wrapModeS, WrapMode wrapModeT, Opacity? opacity)
             {
-                if (upload is AlphaTextureUpload alpha && NativeTexture.PixelFormat == osu.Framework.Graphics.Rendering.TexturePixelFormat.R8G8B8A8Float)
+                if (upload is AlphaTextureUpload alpha && NativeTexture.PixelFormat == TexturePixelFormat.R8G8B8A8Float)
                     upload = alpha.ToRgbaUpload();
 
                 // Can only perform padding when the bounds are a sub-part of the texture
                 RectangleI middleBounds = upload.Bounds;
 
-                if (upload.Format == osu.Framework.Graphics.Rendering.TexturePixelFormat.R8Float)
+                if (upload.Format == TexturePixelFormat.R8Float)
                 {
                     if (!middleBounds.IsEmpty)
                         uploadAlphaPadding(upload.RawData, middleBounds, padding / (1 << upload.Level), wrapModeS, wrapModeT);

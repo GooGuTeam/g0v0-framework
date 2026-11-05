@@ -1,4 +1,4 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
 // See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
@@ -173,7 +173,7 @@ namespace osu.Framework.Graphics.OpenGL.Buffers
 
             if (!InUse)
             {
-                memoryOwner = new osu.Framework.Allocation.PooledMemoryOwner<T>(Size, true);
+                memoryOwner = new Allocation.PooledMemoryOwner<T>(Size, true);
                 vertexMemory = memoryOwner.Memory;
 
                 Renderer.RegisterVertexBufferUse(this);

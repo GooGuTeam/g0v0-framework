@@ -1,4 +1,4 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
 // See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
@@ -106,7 +106,7 @@ namespace osu.Framework.IO.Stores
                     if (convert == null)
                         throw new InvalidOperationException($"Could not load page image for font {FontName} page {page}.");
 
-                    using (var buffer = new osu.Framework.Allocation.PooledMemoryOwner<byte>(convert.Width * convert.Height))
+                    using (var buffer = new Allocation.PooledMemoryOwner<byte>(convert.Width * convert.Height))
                     {
                         var output = buffer.Memory.Span;
                         var source = convert.Data;

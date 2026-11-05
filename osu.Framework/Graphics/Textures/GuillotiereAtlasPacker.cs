@@ -11,7 +11,7 @@ namespace osu.Framework.Graphics.Textures
     /// <summary>Managed adaptation of guillotiere's append-only SimpleAtlasAllocator.</summary>
     internal sealed class GuillotiereAtlasPacker : AppendOnlyAtlasPacker
     {
-        private readonly List<RectangleI>[] freeRectangles = { new List<RectangleI>(), new List<RectangleI>(), new List<RectangleI>() };
+        private readonly List<RectangleI>[] freeRectangles = [[], [], []];
 
         protected override void Initialise(RectangleI bounds)
         {
@@ -24,23 +24,28 @@ namespace osu.Framework.Graphics.Textures
         {
             int idealBucket = bucketFor(width, height);
             bool worstFit = idealBucket == 2;
+
             for (int bucket = idealBucket; bucket < freeRectangles.Length; bucket++)
             {
                 var rectangles = freeRectangles[bucket];
                 int selected = -1;
                 int score = worstFit ? 0 : int.MaxValue;
+
                 for (int i = 0; i < rectangles.Count; i++)
                 {
                     int dx = rectangles[i].Width - width;
                     int dy = rectangles[i].Height - height;
                     if (dx < 0 || dy < 0)
                         continue;
+
                     if (dx == 0 || dy == 0)
                     {
                         selected = i;
                         break;
                     }
+
                     int candidate = Math.Min(dx, dy);
+
                     if (worstFit ? candidate > score : candidate < score)
                     {
                         selected = i;
@@ -50,10 +55,12 @@ namespace osu.Framework.Graphics.Textures
 
                 if (selected < 0)
                     continue;
+
                 RectangleI chosen = rectangles[selected];
                 rectangles.RemoveAt(selected);
                 int remainingWidth = chosen.Width - width;
                 int remainingHeight = chosen.Height - height;
+
                 if ((long)remainingWidth * height > (long)width * remainingHeight)
                 {
                     add(new RectangleI(chosen.X + width, chosen.Y, remainingWidth, chosen.Height));
@@ -64,9 +71,11 @@ namespace osu.Framework.Graphics.Textures
                     add(new RectangleI(chosen.X, chosen.Y + height, chosen.Width, remainingHeight));
                     add(new RectangleI(chosen.X + width, chosen.Y, remainingWidth, height));
                 }
+
                 position = chosen.Location;
                 return true;
             }
+
             position = default;
             return false;
         }

@@ -65,14 +65,16 @@ namespace osu.Framework.Graphics.Veldrid
             packetCallback = receivePacket;
         }
 
-        public static Task<DesktopVideoRecording> StartAsync(GameHost host, AudioManager audioManager, string path, CancellationToken cancellationToken = default, VideoRecordingOptions? options = null)
+        public static Task<DesktopVideoRecording> StartAsync(GameHost host, AudioManager audioManager, string path, CancellationToken cancellationToken = default,
+                                                             VideoRecordingOptions? options = null)
             => startAsync(host, audioManager, path, null, cancellationToken, options ?? new VideoRecordingOptions());
 
         /// <summary>
         /// Starts packet-only encoding. The receiver must enqueue without blocking and
         /// must not perform network I/O. Stop before disposing the receiver or host.
         /// </summary>
-        public static Task<DesktopVideoRecording> StartStreamingAsync(GameHost host, AudioManager audioManager, Action<EncodedVideoPacket> receiver, CancellationToken cancellationToken = default, VideoRecordingOptions? options = null)
+        public static Task<DesktopVideoRecording> StartStreamingAsync(GameHost host, AudioManager audioManager, Action<EncodedVideoPacket> receiver, CancellationToken cancellationToken = default,
+                                                                      VideoRecordingOptions? options = null)
         {
             ArgumentNullException.ThrowIfNull(receiver);
             return startAsync(host, audioManager, string.Empty, receiver, cancellationToken, options ?? new VideoRecordingOptions());
@@ -80,13 +82,15 @@ namespace osu.Framework.Graphics.Veldrid
 
         public void RequestKeyFrame() => Interlocked.Exchange(ref keyFrameRequested, 1);
 
-        private static async Task<DesktopVideoRecording> startAsync(GameHost host, AudioManager audioManager, string path, Action<EncodedVideoPacket>? receiver, CancellationToken cancellationToken, VideoRecordingOptions options)
+        private static async Task<DesktopVideoRecording> startAsync(GameHost host, AudioManager audioManager, string path, Action<EncodedVideoPacket>? receiver, CancellationToken cancellationToken,
+                                                                    VideoRecordingOptions options)
         {
             ArgumentNullException.ThrowIfNull(audioManager);
             if (!OperatingSystem.IsWindows())
                 throw new PlatformNotSupportedException();
             if (File.Exists(path))
                 throw new IOException("Recording destination already exists.");
+
             var recording = new DesktopVideoRecording(host, audioManager, path, receiver, options);
             var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             using var registration = cancellationToken.Register(() => ready.TrySetCanceled(cancellationToken));
@@ -98,6 +102,7 @@ namespace osu.Framework.Graphics.Veldrid
                     recording.session = ((IGpuFrameCaptureRenderer)host.Renderer).StartGpuFrameCapture(4);
                     recording.vulkan = recording.session.Device.BackendType == GraphicsBackend.Vulkan;
                     recording.session.MinimumFrameInterval = Stopwatch.Frequency / options.FrameRate;
+
                     if (recording.vulkan)
                     {
                         recording.vulkanInfo = recording.session.Device.GetVulkanInfo();
@@ -109,7 +114,9 @@ namespace osu.Framework.Graphics.Veldrid
                         recording.device = recording.session.Device.GetD3D11Info().Device;
                         Marshal.ThrowExceptionForHR(g0_record_prepare(recording.device));
                     }
+
                     recording.session.FrameAvailable += recording.pump;
+
                     if (!ready.TrySetResult())
                     {
                         recording.session.FrameAvailable -= recording.pump;
@@ -118,7 +125,7 @@ namespace osu.Framework.Graphics.Veldrid
                 }
                 catch (Exception ex)
                 {
-                    recording.session?.Dispose();
+                    recording.session.Dispose();
                     ready.TrySetException(ex);
                 }
             });
@@ -131,16 +138,20 @@ namespace osu.Framework.Graphics.Veldrid
         {
             if (session.IsDisposed)
                 return;
+
             while (returned.TryDequeue(out var frame))
                 frame.Dispose();
+
             if (stopping)
             {
                 session.Paused = true;
                 frames.CompleteAdding();
                 return;
             }
+
             if (!session.TryAcquireFrame(out var captured))
                 return;
+
             if (!frames.TryAdd(captured!))
             {
                 WorkerQueueDrops++;
@@ -155,6 +166,7 @@ namespace osu.Framework.Graphics.Veldrid
                 stopping = true;
                 host.DrawThread.Scheduler.Add(pump);
             }
+
             return Completion;
         }
 
@@ -166,9 +178,11 @@ namespace osu.Framework.Graphics.Veldrid
             MixerAudioCapture? capture = null;
             long videoEndSample = 0;
             uint recordingWidth = 0, recordingHeight = 0;
+
             try
             {
                 capture = audioManager.BeginCapture(start);
+
                 while (!frames.IsCompleted)
                 {
                     if (recorder != IntPtr.Zero)
@@ -177,53 +191,75 @@ namespace osu.Framework.Graphics.Veldrid
                                            - MixerAudioCapture.SAMPLE_RATE / 10;
                         writeAudioUntil(recorder, capture, audio, Math.Min(videoEndSample, readySample));
                     }
+
                     if (!frames.TryTake(out var frame, 20))
                         continue;
+
                     try
                     {
                         if (recorder != IntPtr.Zero && (frame.Texture.Width != recordingWidth || frame.Texture.Height != recordingHeight))
                             throw new InvalidOperationException("Recording stopped because the window size changed.");
+
                         if (recorder == IntPtr.Zero)
                         {
                             recordingWidth = frame.Texture.Width;
                             recordingHeight = frame.Texture.Height;
+
                             if (vulkan)
                             {
                                 if (frame.Texture.Format != PixelFormat.B8G8R8A8UNorm)
                                     throw new NotSupportedException("Vulkan recording currently requires BGRA8 UNORM.");
+
                                 if (packetReceiver != null)
+                                {
                                     Marshal.ThrowExceptionForHR(g0_vk_stream_open_configured(vulkanInfo!.Instance, vulkanInfo.PhysicalDevice, vulkanInfo.Device,
                                         vulkanInfo.GraphicsQueueFamilyIndex, frame.Texture.Width, frame.Texture.Height, MixerAudioCapture.SAMPLE_RATE, MixerAudioCapture.CHANNELS,
                                         (uint)options.FrameRate, (uint)options.Bitrate, (uint)options.H264Profile,
                                         (uint)options.Width, (uint)options.Height, packetCallback, IntPtr.Zero, out recorder));
+                                }
                                 else
+                                {
                                     Marshal.ThrowExceptionForHR(g0_vk_open_configured(vulkanInfo!.Instance, vulkanInfo.PhysicalDevice, vulkanInfo.Device,
                                         vulkanInfo.GraphicsQueueFamilyIndex, frame.Texture.Width, frame.Texture.Height, path, MixerAudioCapture.SAMPLE_RATE, MixerAudioCapture.CHANNELS,
                                         (uint)options.FrameRate, (uint)options.Bitrate, (uint)options.H264Profile, (uint)options.Width, (uint)options.Height, out recorder));
+                                }
                             }
                             else if (packetReceiver != null)
+                            {
                                 Marshal.ThrowExceptionForHR(g0_stream_open_configured(device, (uint)options.Width, (uint)options.Height,
-                                    MixerAudioCapture.SAMPLE_RATE, MixerAudioCapture.CHANNELS, (uint)options.FrameRate, (uint)options.Bitrate, (uint)options.H264Profile, packetCallback, IntPtr.Zero, out recorder));
+                                    MixerAudioCapture.SAMPLE_RATE, MixerAudioCapture.CHANNELS, (uint)options.FrameRate, (uint)options.Bitrate, (uint)options.H264Profile, packetCallback, IntPtr.Zero,
+                                    out recorder));
+                            }
                             else
+                            {
                                 Marshal.ThrowExceptionForHR(g0_record_open_configured(device, path, (uint)options.Width, (uint)options.Height,
                                     MixerAudioCapture.SAMPLE_RATE, MixerAudioCapture.CHANNELS, (uint)options.FrameRate, (uint)options.Bitrate, (uint)options.H264Profile, out recorder));
+                            }
                         }
+
                         if (packetFailure != null)
                             throw new InvalidOperationException(@"The encoded packet receiver failed.", packetFailure);
+
                         if (Interlocked.Exchange(ref keyFrameRequested, 0) != 0)
                         {
                             // Some encoders only honour their configured GOP cadence.
                             if (vulkan) g0_vk_stream_keyframe(recorder);
                             else g0_stream_keyframe(recorder);
                         }
+
                         long timestamp = (frame.Timestamp - start) * 10000000 / Stopwatch.Frequency;
+
                         if (vulkan)
                         {
                             Marshal.ThrowExceptionForHR(g0_vk_prepare(recorder, vulkanInfo!.GetVkImage(frame.Texture), out IntPtr command, out IntPtr next, out ulong fence));
                             var submitted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                             host.DrawThread.Scheduler.Add(() =>
                             {
-                                try { vulkanInfo.SubmitExternalCapture(command, next, fence); submitted.SetResult(); }
+                                try
+                                {
+                                    vulkanInfo.SubmitExternalCapture(command, next, fence);
+                                    submitted.SetResult();
+                                }
                                 catch (Exception ex) { submitted.SetException(ex); }
                             });
                             submitted.Task.GetAwaiter().GetResult();
@@ -231,6 +267,7 @@ namespace osu.Framework.Graphics.Veldrid
                         }
                         else
                             Marshal.ThrowExceptionForHR(g0_record_frame(recorder, session.Device.GetD3D11Info().GetTexturePointer(frame.Texture), timestamp));
+
                         started.TrySetResult();
                         videoEndSample = (long)((timestamp / 10000000.0 + 1.0 / options.FrameRate) * MixerAudioCapture.SAMPLE_RATE);
                     }
@@ -239,6 +276,7 @@ namespace osu.Framework.Graphics.Veldrid
                         returned.Enqueue(frame);
                     }
                 }
+
                 if (recorder != IntPtr.Zero)
                     writeAudioUntil(recorder, capture, audio, videoEndSample);
             }
@@ -250,6 +288,7 @@ namespace osu.Framework.Graphics.Veldrid
             {
                 stopping = true;
                 capture?.Dispose();
+
                 if (recorder != IntPtr.Zero)
                 {
                     ulong accepted, poolDrops, cadenceDrops;
@@ -264,6 +303,7 @@ namespace osu.Framework.Graphics.Veldrid
                     if (result < 0)
                         failure ??= Marshal.GetExceptionForHR(result);
                 }
+
                 Exception? error = failure;
                 host.DrawThread.Scheduler.Add(() =>
                 {
@@ -279,6 +319,7 @@ namespace osu.Framework.Graphics.Veldrid
                     frames.Dispose();
                     if (recorder == IntPtr.Zero && error == null)
                         error = new InvalidOperationException("No video frames were captured.");
+
                     if (error != null)
                     {
                         started.TrySetException(error);
@@ -296,6 +337,7 @@ namespace osu.Framework.Graphics.Veldrid
             {
                 if (size > 16 * 1024 * 1024)
                     throw new InvalidOperationException(@"Encoded packet exceeds the queue limit.");
+
                 byte[] copy = new byte[checked((int)size)];
                 Marshal.Copy(data, copy, 0, copy.Length);
                 packetReceiver?.Invoke(new EncodedVideoPacket(copy, stream == 0, (flags & 1) != 0, (flags & 2) != 0, pts, dts, duration));
@@ -310,11 +352,16 @@ namespace osu.Framework.Graphics.Veldrid
         private delegate void PacketCallback(IntPtr context, uint stream, IntPtr data, uint size, long pts, long dts, long duration, uint flags);
 
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int g0_stream_open_configured(IntPtr device, uint width, uint height, uint rate, uint channels, uint fps, uint bitrate, uint profile, PacketCallback callback, IntPtr context, out IntPtr recorder);
+        private static extern int g0_stream_open_configured(IntPtr device, uint width, uint height, uint rate, uint channels, uint fps, uint bitrate, uint profile, PacketCallback callback,
+                                                            IntPtr context, out IntPtr recorder);
+
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int g0_vk_stream_open_configured(IntPtr instance, IntPtr physical, IntPtr device, uint family, uint width, uint height, uint rate, uint channels, uint fps, uint bitrate, uint profile, uint outputWidth, uint outputHeight, PacketCallback callback, IntPtr context, out IntPtr recorder);
+        private static extern int g0_vk_stream_open_configured(IntPtr instance, IntPtr physical, IntPtr device, uint family, uint width, uint height, uint rate, uint channels, uint fps, uint bitrate,
+                                                               uint profile, uint outputWidth, uint outputHeight, PacketCallback callback, IntPtr context, out IntPtr recorder);
+
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_stream_keyframe(IntPtr recorder);
+
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vk_stream_keyframe(IntPtr recorder);
 
@@ -332,28 +379,39 @@ namespace osu.Framework.Graphics.Veldrid
         }
 
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
-        private static extern int g0_vk_open_configured(IntPtr instance, IntPtr physical, IntPtr device, uint family, uint width, uint height, string path, uint rate, uint channels, uint fps, uint bitrate, uint profile, uint outputWidth, uint outputHeight, out IntPtr recorder);
+        private static extern int g0_vk_open_configured(IntPtr instance, IntPtr physical, IntPtr device, uint family, uint width, uint height, string path, uint rate, uint channels, uint fps,
+                                                        uint bitrate, uint profile, uint outputWidth, uint outputHeight, out IntPtr recorder);
+
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vk_prepare(IntPtr recorder, ulong image, out IntPtr command, out IntPtr next, out ulong fence);
+
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vk_encode(IntPtr recorder, long time);
+
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vk_audio(IntPtr recorder, [In] float[] pcm, uint frames, long position);
+
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vk_close(IntPtr recorder);
+
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern void g0_vk_stats(IntPtr recorder, out ulong accepted, out ulong pool, out ulong cadence);
 
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_prepare(IntPtr device);
+
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
         private static extern int g0_record_open_configured(IntPtr device, string path, uint width, uint height, uint rate, uint channels, uint fps, uint bitrate, uint profile, out IntPtr recorder);
+
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_frame(IntPtr recorder, IntPtr texture, long timestamp);
+
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_audio(IntPtr recorder, [In] float[] pcm, uint frames, long position);
+
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_close(IntPtr recorder);
+
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern void g0_record_stats(IntPtr recorder, out ulong accepted, out ulong poolDrops, out ulong cadenceDrops);
     }

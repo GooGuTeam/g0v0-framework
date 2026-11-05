@@ -83,10 +83,11 @@ namespace osu.Framework.Tests.Graphics
                         var resource = native.GetResourceList()[0].Texture;
 
                         if (spanUpload)
-                            renderer.UpdateTexture<Rgba32>(resource, 0, 0, texture_size / 2, texture_size, 0, pixels);
+                            renderer.UpdateTexture(resource, 0, 0, texture_size / 2, texture_size, 0, pixels);
                         else
                         {
                             var handle = GCHandle.Alloc(pixels, GCHandleType.Pinned);
+
                             try
                             {
                                 renderer.UpdateTexture(resource, 0, 0, texture_size / 2, texture_size, 0, handle.AddrOfPinnedObject(), texture_size / 2 * 4);

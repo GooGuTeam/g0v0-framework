@@ -4,6 +4,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace osu.Framework.Audio.Callbacks
 {
@@ -13,7 +14,7 @@ namespace osu.Framework.Audio.Callbacks
     /// </summary>
     public static unsafe class NativeWasapiCapture
     {
-        private static readonly object sync = new object();
+        private static readonly Lock sync = new Lock();
         private static IntPtr library;
         private static IntPtr context;
         private static IntPtr procedure;
@@ -29,6 +30,7 @@ namespace osu.Framework.Audio.Callbacks
                     return configured;
             }
         }
+
         private static delegate* unmanaged[Cdecl]<IntPtr, uint, void> setMixer;
         private static delegate* unmanaged[Cdecl]<IntPtr, uint, void> enable;
         private static delegate* unmanaged[Cdecl]<IntPtr, uint, uint, int> configure;
@@ -44,16 +46,20 @@ namespace osu.Framework.Audio.Callbacks
                 string? path = Environment.GetEnvironmentVariable(@"G0V0_WASAPI_CAPTURE_LIBRARY");
                 if (string.IsNullOrEmpty(path))
                     path = Path.Combine(AppContext.BaseDirectory, @"g0v0-wasapi-capture.dll");
+
                 if (context == IntPtr.Zero)
                 {
                     if (!Path.IsPathFullyQualified(path) || !File.Exists(path))
                         return false;
+
                     library = NativeLibrary.Load(path);
+
                     try
                     {
                         var abi = (delegate* unmanaged[Cdecl]<uint>)NativeLibrary.GetExport(library, "g0_capture_abi");
                         if (abi() != 1)
                             throw new NotSupportedException("Unsupported native audio capture ABI.");
+
                         var create = (delegate* unmanaged[Cdecl]<IntPtr, IntPtr>)NativeLibrary.GetExport(library, "g0_capture_create");
                         setMixer = (delegate* unmanaged[Cdecl]<IntPtr, uint, void>)NativeLibrary.GetExport(library, "g0_capture_set_mixer");
                         enable = (delegate* unmanaged[Cdecl]<IntPtr, uint, void>)NativeLibrary.GetExport(library, "g0_capture_enable");
@@ -95,8 +101,10 @@ namespace osu.Framework.Audio.Callbacks
             {
                 if (context == IntPtr.Zero)
                     return;
+
                 if (configure(context, (uint)frequency, (uint)channels) == 0)
                     throw new ArgumentOutOfRangeException(nameof(channels));
+
                 generation++;
                 configured = true;
                 enable(context, captureRequested ? 1u : 0u);
@@ -124,6 +132,7 @@ namespace osu.Framework.Audio.Callbacks
                 captureRequested = enabled;
                 if (context == IntPtr.Zero || !configured)
                     return false;
+
                 enable(context, enabled ? 1u : 0u);
                 return true;
             }
@@ -142,12 +151,15 @@ namespace osu.Framework.Audio.Callbacks
                 deviceGeneration = generation;
                 if (context == IntPtr.Zero || !configured)
                     return false;
+
                 WasapiCaptureBlock info;
+
                 fixed (byte* bytes = destination)
                 {
                     int result = read(context, bytes, (uint)destination.Length, &info);
                     if (result < 0)
                         throw new ArgumentException("PCM destination is too small.", nameof(destination));
+
                     if (result == 0)
                         return false;
                 }
@@ -162,6 +174,7 @@ namespace osu.Framework.Audio.Callbacks
             lock (sync)
             {
                 configured = false;
+
                 if (context != IntPtr.Zero)
                 {
                     destroy(context);

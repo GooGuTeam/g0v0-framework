@@ -558,7 +558,7 @@ namespace osu.Framework.Graphics.OpenGL
         protected internal override Image<Rgba32> TakeScreenshot()
         {
             var size = ((IGraphicsSurface)openGLSurface).GetDrawableSize();
-            var data = new osu.Framework.Allocation.PooledMemoryOwner<Rgba32>(size.Width * size.Height);
+            var data = new Allocation.PooledMemoryOwner<Rgba32>(size.Width * size.Height);
 
             GL.ReadPixels(0, 0, size.Width, size.Height, PixelFormat.Rgba, PixelType.UnsignedByte, ref MemoryMarshal.GetReference(data.Memory.Span));
 
@@ -572,7 +572,7 @@ namespace osu.Framework.Graphics.OpenGL
             int width = frameBuffer.Texture.Width;
             int height = frameBuffer.Texture.Height;
 
-            var data = new osu.Framework.Allocation.PooledMemoryOwner<Rgba32>(width * height);
+            var data = new Allocation.PooledMemoryOwner<Rgba32>(width * height);
 
             frameBuffer.Bind();
             GL.ReadPixels(0, 0, width, height, PixelFormat.Rgba, PixelType.UnsignedByte, ref MemoryMarshal.GetReference(data.Memory.Span));

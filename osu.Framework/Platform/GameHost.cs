@@ -587,7 +587,7 @@ namespace osu.Framework.Platform
                     scaledRenderBuffer.Bind();
                     Renderer.PushViewport(new RectangleI(0, 0, scaledWidth, scaledHeight));
                     Renderer.PushScissor(new RectangleI(0, 0, scaledWidth, scaledHeight));
-                    Renderer.PushOrtho(new osu.Framework.Graphics.Primitives.RectangleF(0, 0, windowSize.X, windowSize.Y));
+                    Renderer.PushOrtho(new RectangleF(0, 0, windowSize.X, windowSize.Y));
                     Renderer.Clear(new ClearInfo(Color4.Black));
                 }
                 else if (scaledRenderBuffer != null)

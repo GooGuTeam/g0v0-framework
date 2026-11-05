@@ -21,16 +21,19 @@ namespace osu.Framework.Tests.Graphics
         {
             IAtlasPacker packer = create(strategy);
             var random = new Random(731);
+
             for (int page = 0; page < 8; page++)
             {
                 packer.Reset(1024, 512);
                 var occupied = new List<RectangleI>();
+
                 for (int i = 0; i < 1000; i++)
                 {
                     int width = random.Next(0, 150);
                     int height = random.Next(0, 100);
                     if (!packer.TryAllocate(width, height, out var position))
                         continue;
+
                     var footprint = new RectangleI(position.X, position.Y, width + TextureAtlas.PADDING, height + TextureAtlas.PADDING);
                     Assert.That(footprint.Left, Is.GreaterThanOrEqualTo(TextureAtlas.PADDING));
                     Assert.That(footprint.Top, Is.GreaterThanOrEqualTo(TextureAtlas.PADDING));
@@ -41,6 +44,7 @@ namespace osu.Framework.Tests.Graphics
                         Assert.That(footprint.IntersectsWith(other), Is.False, $"Overlap: {footprint}, {other}");
                     occupied.Add(footprint);
                 }
+
                 Assert.That(occupied.Count, Is.GreaterThan(10));
             }
         }
@@ -50,9 +54,11 @@ namespace osu.Framework.Tests.Graphics
         public void TestEdgeSizesAndPageRollover(AtlasPackingStrategy strategy)
         {
             const int size = 128;
-            int limit = size - 2 * TextureAtlas.PADDING;
+            const int limit = size - 2 * TextureAtlas.PADDING;
             int[] dimensions = { 0, 1, limit - 1, limit, limit + 1, int.MaxValue };
+
             foreach (int width in dimensions)
+            {
                 foreach (int height in dimensions)
                 {
                     var atlas = new TextureAtlas(new DummyRenderer(), size, size, strategy);
@@ -61,11 +67,14 @@ namespace osu.Framework.Tests.Graphics
                     Assert.That(first != null, Is.EqualTo(fits), $"{width}x{height}");
                     if (first == null)
                         continue;
+
                     var rect = first.GetTextureRect();
                     for (int i = 0; i < 10; i++)
                         Assert.That(atlas.Add(limit, limit - 1), Is.Not.Null);
                     Assert.That(first.GetTextureRect(), Is.EqualTo(rect), "A rollover must not relocate existing regions.");
                 }
+            }
+
             Assert.Throws<ArgumentOutOfRangeException>(() => new TextureAtlas(new DummyRenderer(), size, size, strategy).Add(-1, 10));
         }
 
@@ -85,23 +94,28 @@ namespace osu.Framework.Tests.Graphics
             IAtlasPacker packer = create(strategy);
             int pages = 0;
             double[] measurements = new double[5];
+
             for (int iteration = -1; iteration < measurements.Length; iteration++)
             {
                 packer.Reset(4096, 4096);
                 pages = 1;
                 var timer = Stopwatch.StartNew();
+
                 foreach (var size in sizes)
                 {
                     if (packer.TryAllocate(size.X, size.Y, out _))
                         continue;
+
                     pages++;
                     packer.Reset(4096, 4096);
                     Assert.That(packer.TryAllocate(size.X, size.Y, out _), Is.True);
                 }
+
                 timer.Stop();
                 if (iteration >= 0)
                     measurements[iteration] = timer.Elapsed.TotalMilliseconds;
             }
+
             Array.Sort(measurements);
             TestContext.Out.WriteLine($"{strategy}, varied={varied}: {sizes.Length} allocations, {pages} pages, {measurements[2]:F3} ms (median of 5 after warmup; synthetic CPU-only smoke measurement)");
         }

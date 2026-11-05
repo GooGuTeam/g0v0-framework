@@ -21,8 +21,11 @@ namespace osu.Framework.Input.Handlers.Tablet
 
         public static double RemainingDistance(double distance, double elapsedMilliseconds, double strength)
         {
-            if (!double.IsFinite(distance) || distance <= 0 || !double.IsFinite(elapsedMilliseconds)
-                || !double.IsFinite(strength) || strength <= 0)
+            if (!double.IsFinite(distance)
+                || distance <= 0
+                || !double.IsFinite(elapsedMilliseconds)
+                || !double.IsFinite(strength)
+                || strength <= 0)
                 return 0;
 
             double amount = Math.Clamp(strength, 0, 1);
@@ -47,6 +50,7 @@ namespace osu.Framework.Input.Handlers.Tablet
                 return value;
             if (value >= 3)
                 return 0;
+
             return Math.Log(Math.Tanh(Math.Exp(value)));
         }
     }

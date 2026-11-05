@@ -19,6 +19,7 @@ namespace osu.Framework.Platform
                 byte[] buffer = new byte[16384];
                 if (g0_cpu_diagnostics(buffer, (nuint)buffer.Length) == 0)
                     return @"cpu_features: diagnostic query failed.";
+
                 int length = Array.IndexOf(buffer, (byte)0);
                 return length < 0 ? @"cpu_features: invalid diagnostic response." : Encoding.UTF8.GetString(buffer, 0, length);
             }

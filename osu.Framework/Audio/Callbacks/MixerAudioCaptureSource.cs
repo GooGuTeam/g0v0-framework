@@ -22,7 +22,8 @@ namespace osu.Framework.Audio.Callbacks
 
         public bool IsRetired => Volatile.Read(ref retired) != 0;
 
-        public bool CanRelease => IsRetired && Volatile.Read(ref callbacks) == 0
+        public bool CanRelease => IsRetired
+                                  && Volatile.Read(ref callbacks) == 0
                                   && Volatile.Read(ref read) == Volatile.Read(ref written);
 
         public void Retire() => Volatile.Write(ref retired, 1);
@@ -36,12 +37,13 @@ namespace osu.Framework.Audio.Callbacks
 
         // BASS serialises DSP calls for each mixer. This callback allocates nothing, takes
         // no locks, never waits for the encoder and never changes the playback buffer.
-        public unsafe void Capture(int handle, int channel, IntPtr buffer, int length, IntPtr user)
+        public void Capture(int handle, int channel, IntPtr buffer, int length, IntPtr user)
         {
             if (Volatile.Read(ref retired) != 0)
                 return;
 
             Interlocked.Increment(ref callbacks);
+
             try
             {
                 if (Volatile.Read(ref retired) == 0)
@@ -62,6 +64,7 @@ namespace osu.Framework.Audio.Callbacks
             int frames = length / (sizeof(float) * MixerAudioCapture.CHANNELS);
             long end = (long)((Stopwatch.GetTimestamp() - capture.StartTimestamp) * (double)MixerAudioCapture.SAMPLE_RATE / Stopwatch.Frequency);
             long measuredStart = end - frames;
+
             // Re-anchor after a new recording or stalled device. Small scheduling jitter
             // must not create gaps between otherwise contiguous DSP blocks.
             if (!ReferenceEquals(epoch, capture))
@@ -76,10 +79,12 @@ namespace osu.Framework.Audio.Callbacks
             // Do not re-anchor backwards: overlapping blocks would mix the same source twice.
 
             float* samples = (float*)buffer;
+
             for (int offset = 0; offset < frames;)
             {
                 int count = Math.Min(block_frames, frames - offset);
                 long index = written;
+
                 if (index - Volatile.Read(ref read) < capacity)
                 {
                     Block block = blocks[index % capacity];
@@ -89,6 +94,7 @@ namespace osu.Framework.Audio.Callbacks
                     block.Frames = count;
                     Volatile.Write(ref written, index + 1);
                 }
+
                 // Overflow drops data, never time. The consumer fills the gap with silence.
                 nextPosition += count;
                 offset += count;
@@ -98,17 +104,22 @@ namespace osu.Framework.Audio.Callbacks
         public void Mix(MixerAudioCapture capture, float[] destination, long position, int frames)
         {
             long end = position + frames;
+
             while (read < Volatile.Read(ref written))
             {
                 Block block = blocks[read % capacity];
+
                 if (!ReferenceEquals(block.Capture, capture) || block.Position + block.Frames <= position)
                 {
                     Volatile.Write(ref read, read + 1);
                     continue;
                 }
+
                 if (block.Position >= end) break;
+
                 long first = Math.Max(position, block.Position);
                 long last = Math.Min(end, block.Position + block.Frames);
+
                 for (long sample = first; sample < last; sample++)
                 {
                     int input = (int)(sample - block.Position) * MixerAudioCapture.CHANNELS;
@@ -116,7 +127,9 @@ namespace osu.Framework.Audio.Callbacks
                     destination[output] += block.Samples[input];
                     destination[output + 1] += block.Samples[input + 1];
                 }
+
                 if (block.Position + block.Frames > end) break;
+
                 Volatile.Write(ref read, read + 1);
             }
         }

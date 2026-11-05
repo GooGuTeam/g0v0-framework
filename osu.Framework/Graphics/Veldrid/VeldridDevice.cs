@@ -37,13 +37,12 @@ namespace osu.Framework.Graphics.Veldrid
         /// <summary>
         /// The graphics surface type.
         /// </summary>
-        public GraphicsSurfaceType SurfaceType
-            => graphicsSurface?.Type ?? Device.BackendType switch
-            {
-                GraphicsBackend.Vulkan => GraphicsSurfaceType.Vulkan,
-                GraphicsBackend.Metal => GraphicsSurfaceType.Metal,
-                _ => GraphicsSurfaceType.Direct3D11,
-            };
+        public GraphicsSurfaceType SurfaceType => graphicsSurface?.Type ?? Device.BackendType switch
+        {
+            GraphicsBackend.Vulkan => GraphicsSurfaceType.Vulkan,
+            GraphicsBackend.Metal => GraphicsSurfaceType.Metal,
+            _ => GraphicsSurfaceType.Direct3D11,
+        };
 
         /// <summary>
         /// Enables or disables vertical sync.
@@ -155,6 +154,7 @@ namespace osu.Framework.Graphics.Veldrid
 
             Texture? colour = null;
             Texture? depthTarget = null;
+
             try
             {
                 colour = Factory.CreateTexture(TextureDescription.Texture2D(width, height, 1, 1,
@@ -170,6 +170,7 @@ namespace osu.Framework.Graphics.Veldrid
                 Device.Dispose();
                 throw;
             }
+
             MaxTextureSize = 16384;
             currentWindowSize = new Vector2I((int)width, (int)height);
         }
@@ -178,6 +179,7 @@ namespace osu.Framework.Graphics.Veldrid
         {
             if (offlineFramebuffer == null)
                 throw new InvalidOperationException("Not an offline device.");
+
             Device.WaitForIdle();
             gpuWaitStaging?.Dispose();
             gpuWaitCommands?.Dispose();
@@ -234,8 +236,8 @@ namespace osu.Framework.Graphics.Veldrid
         /// <param name="presentationPreference">DXGI ownership preference.</param>
         /// <param name="vulkanPreference">Vulkan present mode preference.</param>
         /// <param name="requestVulkanExclusiveFullscreen">Whether to negotiate Vulkan FSE support.</param>
-        public VeldridDevice(IGraphicsSurface graphicsSurface, Configuration.PresentationPreference presentationPreference,
-                             Configuration.VulkanPresentationPreference vulkanPreference, bool requestVulkanExclusiveFullscreen)
+        public VeldridDevice(IGraphicsSurface graphicsSurface, PresentationPreference presentationPreference,
+                             VulkanPresentationPreference vulkanPreference, bool requestVulkanExclusiveFullscreen)
         {
             // Veldrid must either be initialised on the main/"input" thread, or in a separate thread away from the draw thread at least.
             // Otherwise the window may not render anything on some platforms (macOS at least).
@@ -246,13 +248,13 @@ namespace osu.Framework.Graphics.Veldrid
             var options = new GraphicsDeviceOptions
             {
                 HasMainSwapchain = true,
-                PreferExclusiveFullscreen = presentationPreference == Configuration.PresentationPreference.PreferExclusiveFullscreen,
+                PreferExclusiveFullscreen = presentationPreference == PresentationPreference.PreferExclusiveFullscreen,
                 RequestVulkanExclusiveFullscreen = requestVulkanExclusiveFullscreen,
                 PreferredVulkanPresentMode = vulkanPreference switch
                 {
-                    Configuration.VulkanPresentationPreference.Immediate => 0,
-                    Configuration.VulkanPresentationPreference.Mailbox => 1,
-                    Configuration.VulkanPresentationPreference.Fifo => 2,
+                    VulkanPresentationPreference.Immediate => 0,
+                    VulkanPresentationPreference.Mailbox => 1,
+                    VulkanPresentationPreference.Fifo => 2,
                     _ => -1,
                 },
                 SwapchainDepthFormat = PixelFormat.R16UNorm,
@@ -390,8 +392,10 @@ namespace osu.Framework.Graphics.Veldrid
             {
                 if (windowSize != currentWindowSize)
                     throw new InvalidOperationException("Offline export size is fixed.");
+
                 return;
             }
+
             if (windowSize != currentWindowSize)
             {
                 Device.ResizeMainWindow((uint)windowSize.X, (uint)windowSize.Y);
@@ -466,7 +470,7 @@ namespace osu.Framework.Graphics.Veldrid
                 // OpenGL already provides a method for reading pixels directly from the active framebuffer, so let's just use that for now.
                 case GraphicsSurfaceType.OpenGL:
                 {
-                    var pixelData = new osu.Framework.Allocation.PooledMemoryOwner<Rgba32>((int)(texture.Width * texture.Height));
+                    var pixelData = new Allocation.PooledMemoryOwner<Rgba32>((int)(texture.Width * texture.Height));
 
                     var info = Device.GetOpenGLInfo();
 

@@ -1,5 +1,6 @@
 // Copyright (c) GooGuTeam. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
+
 using System;
 using System.Buffers;
 using System.Drawing;
@@ -9,14 +10,23 @@ namespace osu.Framework.Imaging
     public sealed class ImageProcessingContext<T> where T : unmanaged, IPixel<T>
     {
         private readonly Image<T> image;
+
         internal ImageProcessingContext(Image<T> image) => this.image = image;
+
         public Size GetCurrentSize() => image.Size;
+
         public ImageProcessingContext<T> Crop(int width, int height) => Crop(new Rectangle(0, 0, width, height));
+
         public ImageProcessingContext<T> Crop(Rectangle rectangle)
         {
-            if (rectangle.Width <= 0 || rectangle.Height <= 0 || rectangle.X < 0 || rectangle.Y < 0 ||
-                (long)rectangle.X + rectangle.Width > image.Width || (long)rectangle.Y + rectangle.Height > image.Height)
+            if (rectangle.Width <= 0
+                || rectangle.Height <= 0
+                || rectangle.X < 0
+                || rectangle.Y < 0
+                || (long)rectangle.X + rectangle.Width > image.Width
+                || (long)rectangle.Y + rectangle.Height > image.Height)
                 throw new ArgumentOutOfRangeException(nameof(rectangle));
+
             var pixels = new T[checked(rectangle.Width * rectangle.Height)];
             for (int y = 0; y < rectangle.Height; y++)
                 image.Pixels.Slice((y + rectangle.Y) * image.Width + rectangle.X, rectangle.Width).CopyTo(pixels.AsSpan(y * rectangle.Width));
@@ -28,11 +38,14 @@ namespace osu.Framework.Imaging
         {
             if (image.Height < 2)
                 return this;
+
             var temporary = ArrayPool<T>.Shared.Rent(image.Width);
+
             try
             {
                 var pixels = image.Pixels;
                 var row = temporary.AsSpan(0, image.Width);
+
                 for (int y = 0; y < image.Height / 2; y++)
                 {
                     var top = pixels.Slice(y * image.Width, image.Width);
@@ -43,6 +56,7 @@ namespace osu.Framework.Imaging
                 }
             }
             finally { ArrayPool<T>.Shared.Return(temporary); }
+
             return this;
         }
 
@@ -56,6 +70,7 @@ namespace osu.Framework.Imaging
                 value.FromRgba32(new Rgba32(luma, luma, luma, p.A));
                 image.Pixels[i] = value;
             }
+
             return this;
         }
 
@@ -63,6 +78,7 @@ namespace osu.Framework.Imaging
         {
             if (resampler != ImageResampler.Bilinear && resampler != ImageResampler.Bicubic)
                 throw new ArgumentOutOfRangeException(nameof(resampler));
+
             int pixelCount = Image<T>.ValidateDimensions(size.Width, size.Height);
 
             if (size == image.Size)
@@ -83,8 +99,8 @@ namespace osu.Framework.Imaging
                 using var converted = rgba.CloneAs<T>();
                 image.ReplacePixels(size.Width, size.Height, converted.Pixels.ToArray());
             }
+
             return this;
         }
-
     }
 }

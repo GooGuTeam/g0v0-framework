@@ -1,4 +1,4 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
 // See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
@@ -35,11 +35,11 @@ namespace osu.Framework.Graphics.Textures
 
         public virtual int Height => image?.Height ?? 0;
 
-        public virtual osu.Framework.Graphics.Rendering.TexturePixelFormat Format => format;
+        public virtual TexturePixelFormat Format => format;
 
         public virtual ReadOnlySpan<byte> RawData => MemoryMarshal.AsBytes(Data);
 
-        private readonly osu.Framework.Graphics.Rendering.TexturePixelFormat format;
+        private readonly TexturePixelFormat format;
 
         /// <summary>
         /// The backing texture. A handle is kept to avoid early GC.
@@ -54,7 +54,7 @@ namespace osu.Framework.Graphics.Textures
         /// <param name="image">The texture to upload.</param>
         public TextureUpload(Image<Rgba32> image)
         {
-            format = osu.Framework.Graphics.Rendering.TexturePixelFormat.R8G8B8A8Float;
+            format = TexturePixelFormat.R8G8B8A8Float;
             this.image = image;
             pixelMemory = image.CreateReadOnlyPixelMemory();
         }
@@ -77,14 +77,14 @@ namespace osu.Framework.Graphics.Textures
         /// Create an empty upload. Used by <see cref="IFrameBuffer"/> for initialisation.
         /// </summary>
         internal TextureUpload()
-            : this(osu.Framework.Graphics.Rendering.TexturePixelFormat.R8G8B8A8Float)
+            : this(TexturePixelFormat.R8G8B8A8Float)
         {
         }
 
         /// <summary>
         /// Create an empty upload matching a framebuffer's storage format.
         /// </summary>
-        internal TextureUpload(osu.Framework.Graphics.Rendering.TexturePixelFormat format)
+        internal TextureUpload(TexturePixelFormat format)
         {
             this.format = format;
         }

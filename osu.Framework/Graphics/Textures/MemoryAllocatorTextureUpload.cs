@@ -29,7 +29,7 @@ namespace osu.Framework.Graphics.Textures
         /// <param name="height">The height of the texture.</param>
         public MemoryAllocatorTextureUpload(int width, int height)
         {
-            memoryOwner = new osu.Framework.Allocation.PooledMemoryOwner<Rgba32>(Image<Rgba32>.ValidateDimensions(width, height), clear: true);
+            memoryOwner = new Allocation.PooledMemoryOwner<Rgba32>(Image<Rgba32>.ValidateDimensions(width, height), clear: true);
         }
 
         #region IDisposable Support

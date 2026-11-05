@@ -19,8 +19,8 @@ namespace osu.Framework.Graphics.Veldrid.Buffers
         where T : unmanaged, IEquatable<T>, IVertex
     {
         private readonly IVeldridRenderer renderer;
-        private readonly List<(DeviceBuffer Buffer, NativeMemoryTracker.NativeMemoryLease Lease)> chunks = new();
-        private VeldridIndexBuffer? indexBuffer;
+        private readonly List<(DeviceBuffer Buffer, NativeMemoryTracker.NativeMemoryLease Lease)> chunks = new List<(DeviceBuffer Buffer, NativeMemoryTracker.NativeMemoryLease Lease)>();
+        private readonly VeldridIndexBuffer? indexBuffer;
 
         public VeldridStaticQuadMesh(Renderer renderer, ReadOnlySpan<T> vertices)
             : base(renderer, vertices.Length)

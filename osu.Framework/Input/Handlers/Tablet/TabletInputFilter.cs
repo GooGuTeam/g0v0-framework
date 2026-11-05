@@ -20,6 +20,7 @@ namespace osu.Framework.Input.Handlers.Tablet
         public Vector2 FilterPosition(Vector2 input, double now, double smoothing, double radialStrength, Vector2 millimetresPerPixel)
         {
             double elapsed = now - lastTime;
+
             if (position == null || (radialStrength <= 0 && smoothing <= 0) || elapsed > 100 || elapsed < 0)
                 position = input;
             else if (radialStrength > 0)
@@ -28,6 +29,7 @@ namespace osu.Framework.Input.Handlers.Tablet
                 double x = delta.X * (double)millimetresPerPixel.X;
                 double y = delta.Y * (double)millimetresPerPixel.Y;
                 double distance = Math.Sqrt(x * x + y * y);
+
                 if (distance > 0)
                 {
                     double remaining = RadialFollowSmoothing.RemainingDistance(distance, elapsed, radialStrength);
@@ -36,14 +38,16 @@ namespace osu.Framework.Input.Handlers.Tablet
             }
             else
                 position += (input - position.Value) * (float)(1 - Math.Exp(-elapsed / smoothing));
+
             lastTime = now;
-            return position.Value;
+            return position!.Value;
         }
 
         public void SetButton(int key, bool pressed, double now)
         {
             if (!buttons.TryGetValue(key, out var state))
                 buttons.Add(key, state = new ButtonState());
+
             if (state.Candidate != pressed)
             {
                 state.Candidate = pressed;
@@ -58,6 +62,7 @@ namespace osu.Framework.Input.Handlers.Tablet
                 var state = pair.Value;
                 if (state.Candidate == state.Pressed || now - state.Since < debounce)
                     continue;
+
                 state.Pressed = state.Candidate;
                 emit(pair.Key, state.Pressed);
             }
@@ -68,11 +73,13 @@ namespace osu.Framework.Input.Handlers.Tablet
         public void Reset(Action<int, bool> emit)
         {
             ResetPosition();
+
             foreach (var pair in buttons)
             {
                 if (pair.Value.Pressed)
                     emit(pair.Key, false);
             }
+
             buttons.Clear();
         }
 

@@ -16,7 +16,7 @@ namespace osu.Framework.Audio.Callbacks
     /// </summary>
     public static class WasapiNativeBridge
     {
-        private static readonly object sync_lock = new object();
+        private static readonly Lock sync_lock = new Lock();
 
         private static IntPtr userContext = IntPtr.Zero;
         private static IntPtr nativeProcedure = IntPtr.Zero;
@@ -120,6 +120,7 @@ namespace osu.Framework.Audio.Callbacks
         {
             NativeWasapiCapture.SetMixer(handle);
             IntPtr ctx = userContext;
+
             if (ctx != IntPtr.Zero)
             {
                 Marshal.WriteInt32(ctx, handle);
@@ -194,7 +195,7 @@ namespace osu.Framework.Audio.Callbacks
                     return false;
             }
 
-            if (machineCode == null || machineCode.Length == 0)
+            if (machineCode.Length == 0)
                 return false;
 
             // Allocate readable/writable page, copy inlined machine code, then mark as executable/read-only (W^X security)
@@ -216,6 +217,8 @@ namespace osu.Framework.Audio.Callbacks
             return true;
         }
 
+// ReSharper disable MultipleSpaces
+// ReSharper disable BadListLineBreaks
         private static byte[] generateX64Thunk(IntPtr targetProc)
         {
             // Windows x64 ABI:
@@ -314,6 +317,8 @@ namespace osu.Framework.Audio.Callbacks
             Array.Copy(BitConverter.GetBytes(targetProc.ToInt32()), 0, code, 24, 4);
             return code;
         }
+// ReSharper restore MultipleSpaces
+// ReSharper restore BadListLineBreaks
 
         private static bool tryGetBassChannelGetData(out IntPtr address)
         {
@@ -355,8 +360,7 @@ namespace osu.Framework.Audio.Callbacks
 
             foreach (string p in paths)
             {
-                if (NativeLibrary.TryLoad(p, typeof(WasapiNativeBridge).Assembly, DllImportSearchPath.SafeDirectories, out IntPtr h) ||
-                    NativeLibrary.TryLoad(p, out h))
+                if (NativeLibrary.TryLoad(p, typeof(WasapiNativeBridge).Assembly, DllImportSearchPath.SafeDirectories, out IntPtr h) || NativeLibrary.TryLoad(p, out h))
                 {
                     if (NativeLibrary.TryGetExport(h, "BASS_ChannelGetData", out address))
                         return true;

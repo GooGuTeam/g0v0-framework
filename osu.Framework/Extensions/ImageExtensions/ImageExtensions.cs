@@ -48,7 +48,7 @@ namespace osu.Framework.Extensions.ImageExtensions
         internal static IMemoryOwner<TPixel> CreateContiguousMemory<TPixel>(this Image<TPixel> image)
             where TPixel : unmanaged, IPixel<TPixel>
         {
-            var allocatedOwner = new osu.Framework.Allocation.PooledMemoryOwner<TPixel>(image.Width * image.Height);
+            var allocatedOwner = new Allocation.PooledMemoryOwner<TPixel>(image.Width * image.Height);
             var allocatedMemory = allocatedOwner.Memory;
 
             for (int r = 0; r < image.Height; r++)

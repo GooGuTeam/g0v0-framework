@@ -2,7 +2,6 @@
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
-using System.Linq;
 using System.Runtime.InteropServices;
 using osu.Framework.Graphics.Rendering;
 using osu.Framework.Platform;
@@ -31,11 +30,25 @@ namespace osu.Framework.Graphics.OpenGL
             bool resident = false;
             int previousTexture = GL.GetInteger(GetPName.TextureBinding2D);
             int previousProgram = GL.GetInteger(GetPName.CurrentProgram);
+
             try
             {
-                vertex = compile(ShaderType.VertexShader, "#version 400\nvoid main() { gl_Position = vec4(0, 0, 0, 1); }");
+                vertex = compile(ShaderType.VertexShader,
+                    """
+                    #version 400
+                    void main() { gl_Position = vec4(0, 0, 0, 1); }
+                    """
+                );
                 fragment = compile(ShaderType.FragmentShader,
-                    "#version 400\n#extension GL_ARB_bindless_texture : require\nlayout(bindless_sampler) uniform sampler2D probeTexture;\nout vec4 colour;\nvoid main() { colour = texture(probeTexture, vec2(0.5)); }");
+                    """
+                    #version 400
+                    #extension GL_ARB_bindless_texture : require
+                    layout(bindless_sampler) uniform sampler2D probeTexture;
+                    out vec4 colour;
+                    void main() { colour = texture(probeTexture, vec2(0.5)); }
+                    """
+                );
+
                 program = GL.CreateProgram();
                 GL.AttachShader(program, vertex);
                 GL.AttachShader(program, fragment);
@@ -52,18 +65,22 @@ namespace osu.Framework.Graphics.OpenGL
                 handle = getHandle((uint)texture);
                 if (handle == 0)
                     throw new InvalidOperationException("Driver returned a zero bindless texture handle.");
+
                 makeResident(handle);
                 resident = isResident(handle) != 0;
                 if (!resident)
                     throw new InvalidOperationException("Texture handle could not be made resident.");
+
                 GL.UseProgram(program);
                 int location = GL.GetUniformLocation(program, "probeTexture");
                 if (location < 0)
                     throw new InvalidOperationException("Bindless sampler uniform is unavailable.");
+
                 setUniform(location, handle);
                 var error = GL.GetError();
                 if (error != ErrorCode.NoError)
                     throw new InvalidOperationException($"Bindless probe GL error: {error}");
+
                 return new BindlessTextureProbeResult(BindlessTextureProbeStatus.ShaderAndResidencyValidated,
                     "ARB shader compile/link, texture residency and sampler handle assignment passed. Sampling/readback and non-uniform indexing are not validated; renderer remains bound-texture based.");
             }
@@ -83,6 +100,7 @@ namespace osu.Framework.Graphics.OpenGL
         private static int compile(ShaderType type, string source)
         {
             int shader = GL.CreateShader(type);
+
             try
             {
                 GL.ShaderSource(shader, source);
@@ -90,6 +108,7 @@ namespace osu.Framework.Graphics.OpenGL
                 GL.GetShader(shader, ShaderParameter.CompileStatus, out int compiled);
                 if (compiled == 0)
                     throw new InvalidOperationException(GL.GetShaderInfoLog(shader));
+
                 return shader;
             }
             catch
@@ -104,15 +123,19 @@ namespace osu.Framework.Graphics.OpenGL
             IntPtr address = surface.GetProcAddress(name);
             if (address == IntPtr.Zero || address == new IntPtr(1) || address == new IntPtr(2) || address == new IntPtr(3) || address == new IntPtr(-1))
                 throw new NotSupportedException($"Missing bindless entry point: {name}");
+
             return Marshal.GetDelegateForFunctionPointer<T>(address);
         }
 
         [UnmanagedFunctionPointer(CallingConvention.Winapi)]
         private delegate ulong GetTextureHandle(uint texture);
+
         [UnmanagedFunctionPointer(CallingConvention.Winapi)]
         private delegate void SetResidency(ulong handle);
+
         [UnmanagedFunctionPointer(CallingConvention.Winapi)]
         private delegate byte IsResident(ulong handle);
+
         [UnmanagedFunctionPointer(CallingConvention.Winapi)]
         private delegate void UniformHandle(int location, ulong handle);
     }

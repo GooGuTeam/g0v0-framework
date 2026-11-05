@@ -199,13 +199,13 @@ namespace osu.Framework.Graphics.Textures
         {
             ObjectDisposedException.ThrowIf(!Available, this);
 
-            if (upload is AlphaTextureUpload alpha && NativeTexture.PixelFormat == osu.Framework.Graphics.Rendering.TexturePixelFormat.R8G8B8A8Float)
+            if (upload is AlphaTextureUpload alpha && NativeTexture.PixelFormat == TexturePixelFormat.R8G8B8A8Float)
                 upload = alpha.ToRgbaUpload();
 
             if (upload.Bounds.Width > NativeTexture.MaxSize || upload.Bounds.Height > NativeTexture.MaxSize)
                 throw new TextureTooLargeForGLException();
 
-            int bytesPerPixel = upload.Format == osu.Framework.Graphics.Rendering.TexturePixelFormat.R8Float ? 1 : 4;
+            int bytesPerPixel = upload.Format == TexturePixelFormat.R8Float ? 1 : 4;
 
             if (upload.Bounds.IsEmpty && upload.RawData.Length > 0)
             {
