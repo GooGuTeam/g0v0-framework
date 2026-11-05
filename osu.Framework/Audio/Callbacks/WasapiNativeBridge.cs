@@ -217,8 +217,8 @@ namespace osu.Framework.Audio.Callbacks
             return true;
         }
 
-// ReSharper disable MultipleSpaces
-// ReSharper disable BadListLineBreaks
+        // ReSharper disable MultipleSpaces
+        // ReSharper disable BadListLineBreaks
         private static byte[] generateX64Thunk(IntPtr targetProc)
         {
             // Windows x64 ABI:
@@ -317,8 +317,8 @@ namespace osu.Framework.Audio.Callbacks
             Array.Copy(BitConverter.GetBytes(targetProc.ToInt32()), 0, code, 24, 4);
             return code;
         }
-// ReSharper restore MultipleSpaces
-// ReSharper restore BadListLineBreaks
+        // ReSharper restore MultipleSpaces
+        // ReSharper restore BadListLineBreaks
 
         private static bool tryGetBassChannelGetData(out IntPtr address)
         {

@@ -110,7 +110,8 @@ namespace osu.Framework.Graphics.Video
                 cancellationRegistration = cancellationToken.Register(() => kill(encoder));
                 pipeWriter = new Thread(() => writePipe(encoder.StandardInput.BaseStream))
                 {
-                    IsBackground = true, Name = @"FFmpeg video pipe"
+                    IsBackground = true,
+                    Name = @"FFmpeg video pipe"
                 };
                 pipeWriter.Start();
             }
@@ -305,7 +306,10 @@ namespace osu.Framework.Graphics.Video
         {
             var info = new ProcessStartInfo(executable)
             {
-                UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardInput = true,
+                RedirectStandardError = true,
             };
             add(info, @"-nostdin", @"-hide_banner", @"-loglevel", @"error", @"-n");
             return info;
