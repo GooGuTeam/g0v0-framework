@@ -59,12 +59,12 @@ jobs:
           exit $exit_code
 
       - name: InspectCode
-        uses: JetBrains/ReSharper-InspectCode@v0.11
+        uses: JetBrains/ReSharper-InspectCode@v0.14
         with:
           # this is WTF tier but if you don't specify *both* of these the defaults assume `build: true`
           build: false
           no-build: true
-          tool-version: '2026.2.1'
+          tool-version: '2026.2.4.1'
           solution: ./osu-framework.Desktop.slnf
           caches-home: inspectcode
           verbosity: WARN
@@ -102,6 +102,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: 1.26.1
+          cache: false
 
       - name: Install httpbin
         run: go install github.com/mccutchen/go-httpbin/v2/cmd/go-httpbin@latest
