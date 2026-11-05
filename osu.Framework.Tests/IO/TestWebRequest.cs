@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
@@ -41,7 +41,7 @@ namespace osu.Framework.Tests.IO
             if (localHttpBin)
             {
                 // httpbin very frequently falls over and causes random tests to fail
-                // Thus github actions builds rely on a local httpbin instance to run the tests
+                // Thus GitHub Actions builds rely on a local httpbin instance to run the tests
 
                 host = "127.0.0.1:8080";
                 protocols = new[] { default_protocol };
@@ -203,16 +203,21 @@ namespace osu.Framework.Tests.IO
             Exception finishedException = null;
             request.Failed += exception => finishedException = exception;
 
-            if (async)
-                Assert.ThrowsAsync<HttpRequestException>(() => request.PerformAsync());
-            else
-                Assert.Throws<HttpRequestException>(request.Perform);
+            var thrownException = async ? Assert.ThrowsAsync<WebRequestException>(() => request.PerformAsync()) : Assert.Throws<WebRequestException>(request.Perform);
 
             Assert.IsTrue(request.Completed);
             Assert.IsTrue(request.Aborted);
 
             Assert.IsTrue(request.GetResponseString() == null);
             Assert.IsNotNull(finishedException);
+            Assert.IsNotNull(thrownException);
+
+            // name resolution failures happen before any response is received, so no status code is available.
+            Assert.IsNull(thrownException!.StatusCode);
+            Assert.IsTrue(thrownException.IsConnectivityFailure);
+            Assert.IsFalse(thrownException.IsServerError);
+            Assert.AreEqual(request.Url, thrownException.Url);
+            Assert.IsInstanceOf<HttpRequestException>(thrownException.InnerException);
         }
 
         [Test, Retry(5)]
@@ -223,15 +228,19 @@ namespace osu.Framework.Tests.IO
             bool hasThrown = false;
             request.Failed += exception => hasThrown = exception != null;
 
-            if (async)
-                Assert.ThrowsAsync<WebException>(() => request.PerformAsync());
-            else
-                Assert.Throws<WebException>(request.Perform);
+            var thrownException = async ? Assert.ThrowsAsync<WebRequestException>(() => request.PerformAsync()) : Assert.Throws<WebRequestException>(request.Perform);
 
             Assert.IsTrue(request.Completed);
             Assert.IsTrue(request.Aborted);
 
             Assert.IsTrue(hasThrown);
+
+            // the exception carries the status code the server responded with (the exact code depends on the httpbin deployment),
+            // which must never be mistaken for a connectivity failure.
+            Assert.IsNotNull(thrownException!.StatusCode);
+            Assert.AreEqual(request.ResponseStatusCode, thrownException.StatusCode);
+            Assert.IsFalse(thrownException.IsConnectivityFailure);
+            Assert.AreEqual(WebExceptionStatus.ProtocolError, thrownException.Status);
         }
 
         [Test, Retry(5)]
@@ -495,14 +504,20 @@ namespace osu.Framework.Tests.IO
             Exception thrownException = null;
             request.Failed += e => thrownException = e;
 
-            Assert.Throws<WebException>(request.Perform);
+            Assert.Throws<WebRequestException>(request.Perform);
 
             Assert.IsTrue(request.Completed);
             Assert.IsTrue(request.Aborted);
 
             Assert.That(thrownException, Is.Not.Null);
             Assert.AreEqual(WebRequest.MAX_RETRIES, request.RetryCount);
-            Assert.AreEqual(typeof(WebException), thrownException.GetType());
+            Assert.AreEqual(typeof(WebRequestException), thrownException.GetType());
+
+            var requestException = (WebRequestException)thrownException;
+
+            Assert.AreEqual(WebExceptionStatus.Timeout, requestException.Status);
+            Assert.IsNull(requestException.StatusCode);
+            Assert.IsTrue(requestException.IsConnectivityFailure);
         }
 
         /// <summary>
@@ -753,7 +768,7 @@ namespace osu.Framework.Tests.IO
                 If set to above two, the deadlock will not reliably reproduce.
 
                 Also note that the TPL thread pool generally gets much higher values than this (based on logical core count) and will expand with demand.
-                This is explicitly testing for a case that came up on Github Actions due to limited processor count and refusal to expand the thread pool (for whatever reason).
+                This is explicitly testing for a case that came up on GitHub Actions due to limited processor count and refusal to expand the thread pool (for whatever reason).
 
                 This may require adjustment in the future if we end up using more thread pool threads in the background, or if NUnit changes how they used them.
                 */

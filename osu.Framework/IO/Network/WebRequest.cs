@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
@@ -408,8 +408,8 @@ namespace osu.Framework.IO.Network
                 }
                 catch (Exception) when (timeoutToken.IsCancellationRequested)
                 {
-                    await Complete(new WebException($"Request to {url} timed out after {timeSinceLastAction / 1000} seconds idle (read {responseBytesRead} bytes, retried {RetryCount} times).",
-                        WebExceptionStatus.Timeout)).ConfigureAwait(false);
+                    await Complete(new WebRequestException(url, WebExceptionStatus.Timeout,
+                        $"Request to {url} timed out after {timeSinceLastAction / 1000} seconds idle (read {responseBytesRead} bytes, retried {RetryCount} times).")).ConfigureAwait(false);
                 }
                 catch (Exception) when (abortToken.IsCancellationRequested || cancellationToken.IsCancellationRequested)
                 {
@@ -430,7 +430,7 @@ namespace osu.Framework.IO.Network
                 // Aborting via the cancellation token will not set the correct aborted/completion states. Make sure they're set here.
                 Abort();
 
-                Complete(new WebException($"Request to {url} aborted by user.", WebExceptionStatus.RequestCanceled));
+                Complete(new WebRequestException(url, WebExceptionStatus.RequestCanceled, $"Request to {url} aborted by user."));
             }
         }
 
@@ -510,6 +510,11 @@ namespace osu.Framework.IO.Network
             {
                 switch (e)
                 {
+                    // failures raised by this class are already classified.
+                    case WebRequestException wre:
+                        wasTimeout = wre.Status == WebExceptionStatus.Timeout;
+                        break;
+
                     case WebException we:
                         wasTimeout = we.Status == WebExceptionStatus.Timeout;
                         break;
@@ -539,13 +544,19 @@ namespace osu.Framework.IO.Network
                             wasMacOSNetworkBlock = true;
                         }
 
+                        e = createTransportFailure(hre);
                         break;
                     }
+
+                    // failures which happened while reading the response body off the wire.
+                    case HttpIOException or SocketException:
+                        e = createTransportFailure(e);
+                        break;
                 }
             }
             else if (!response.IsSuccessStatusCode)
             {
-                e = new WebException(response.StatusCode.ToString());
+                e = new WebRequestException(Url, response.StatusCode, $"Request failed with status code {(int)response.StatusCode} ({response.StatusCode}).");
 
                 switch (response.StatusCode)
                 {
@@ -632,6 +643,33 @@ namespace osu.Framework.IO.Network
             }
 
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Classifies an exception raised by the underlying HTTP stack into a <see cref="WebRequestException"/>.
+        /// </summary>
+        private WebRequestException createTransportFailure(Exception exception)
+        {
+            if (exception is HttpRequestException { StatusCode: { } statusCode })
+                return new WebRequestException(Url, statusCode, $"Request failed with status code {(int)statusCode} ({statusCode}).", exception);
+
+            WebExceptionStatus status = exception switch
+            {
+                HttpRequestException hre => hre.HttpRequestError switch
+                {
+                    HttpRequestError.NameResolutionError => WebExceptionStatus.NameResolutionFailure,
+                    HttpRequestError.ConnectionError => WebExceptionStatus.ConnectFailure,
+                    HttpRequestError.SecureConnectionError => WebExceptionStatus.SecureChannelFailure,
+                    HttpRequestError.ResponseEnded => WebExceptionStatus.ConnectionClosed,
+                    HttpRequestError.HttpProtocolError => WebExceptionStatus.ProtocolError,
+                    _ => WebExceptionStatus.UnknownError,
+                },
+                HttpIOException => WebExceptionStatus.ReceiveFailure,
+                SocketException => WebExceptionStatus.ConnectFailure,
+                _ => WebExceptionStatus.UnknownError,
+            };
+
+            return new WebRequestException(Url, status, $"Request failed: {exception.Message}", exception);
         }
 
         /// <summary>

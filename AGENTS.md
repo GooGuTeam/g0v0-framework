@@ -10,6 +10,7 @@
 - 本仓库是 [ppy/osu-framework](https://github.com/ppy/osu-framework) 的 fork，由 **GooGuTeam** 维护，产品名 **g0v0!framework**；NuGet 包名 `g0v0.Framework`（`osu.Framework/osu.Framework.csproj` 的 `PackageId`）。
 - 相比上游的主要改动（fork 基线提交，判断差异是否有意时先查它们）：
   - 加载错误边界：`osu.Framework/Development/LoadErrorHandling.cs`、`osu.Framework/Graphics/LoadErrorPlaceholder.cs`（新增）、`FrameworkConfigManager.cs`、`GameHost.cs` 及 `Drawable` / `CompositeDrawable` 系列（PR #1 `feat/load-error-boundary`）；
+  - 网络失败分类：`osu.Framework/IO/Network/WebRequestException.cs`（新增），`WebRequest` 的**所有**请求级失败（状态码、传输层、超时）统一抛该类型（继承 `WebException`，携带 `Url` / `StatusCode` / `IsConnectivityFailure` / `IsServerError`）；`GameHost.unobservedExceptionHandler` 对其降级为 `LoggingTarget.Network` 的 Verbose 日志，不再走 `Logger.Error`（客户端据此不弹窗、不上报）；
   - 包名与发布管线切换：`16b556b17`；
   - 许可拆分与版权头重写：`84c75e2d8`（已记入 `.git-blame-ignore-revs`）。
 - 许可：MIT，根目录两份 —— `LICENCE`（本 fork 新增部分，GooGuTeam）与 `LICENCE-OSU`（上游部分，ppy Pty Ltd）。NuGet 元数据集中在 `Directory.Build.props`。

@@ -1,12 +1,14 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
 using System;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using osu.Framework.IO.Network;
 using osu.Framework.Logging;
 using osu.Framework.Testing;
 
@@ -163,6 +165,48 @@ namespace osu.Framework.Tests.IO
         private void performTaskException()
         {
             var task = Task.Run(() => throw new TestException());
+            while (!task.IsCompleted)
+                Thread.Sleep(1);
+        }
+
+        /// <summary>
+        /// A request failing is an expected part of operating online rather than an application error,
+        /// so it must be logged away from the pathway consumers use to notify the user and report to developers.
+        /// </summary>
+        [Test]
+        public void TestUnobservedRequestFailureLogging()
+        {
+            LogEntry resolvedEntry = null;
+
+            void logTest(LogEntry entry)
+            {
+                if (entry.Exception is WebRequestException)
+                    resolvedEntry = entry;
+            }
+
+            Logger.NewEntry += logTest;
+
+            try
+            {
+                using (new BackgroundGameHeadlessGameHost())
+                {
+                    performRequestFailure();
+                    collectAndFireUnobserved();
+                }
+            }
+            finally
+            {
+                Logger.NewEntry -= logTest;
+            }
+
+            Assert.IsNotNull(resolvedEntry, "request failure wasn't forwarded by logger");
+            Assert.AreEqual(LogLevel.Verbose, resolvedEntry.Level, "network failures must not be logged at a level which triggers error reporting");
+            Assert.AreEqual(LoggingTarget.Network, resolvedEntry.Target);
+        }
+
+        private void performRequestFailure()
+        {
+            var task = Task.Run(() => throw new WebRequestException("https://example.com/api", HttpStatusCode.NotFound, "request failed"));
             while (!task.IsCompleted)
                 Thread.Sleep(1);
         }
