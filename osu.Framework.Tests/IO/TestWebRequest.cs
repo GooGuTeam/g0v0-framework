@@ -41,7 +41,7 @@ namespace osu.Framework.Tests.IO
             if (localHttpBin)
             {
                 // httpbin very frequently falls over and causes random tests to fail
-                // Thus github actions builds rely on a local httpbin instance to run the tests
+                // Thus GitHub Actions builds rely on a local httpbin instance to run the tests
 
                 host = "127.0.0.1:8080";
                 protocols = new[] { default_protocol };
@@ -203,21 +203,17 @@ namespace osu.Framework.Tests.IO
             Exception finishedException = null;
             request.Failed += exception => finishedException = exception;
 
-            WebRequestException thrownException;
-
-            if (async)
-                thrownException = Assert.ThrowsAsync<WebRequestException>(() => request.PerformAsync());
-            else
-                thrownException = Assert.Throws<WebRequestException>(request.Perform);
+            var thrownException = async ? Assert.ThrowsAsync<WebRequestException>(() => request.PerformAsync()) : Assert.Throws<WebRequestException>(request.Perform);
 
             Assert.IsTrue(request.Completed);
             Assert.IsTrue(request.Aborted);
 
             Assert.IsTrue(request.GetResponseString() == null);
             Assert.IsNotNull(finishedException);
+            Assert.IsNotNull(thrownException);
 
             // name resolution failures happen before any response is received, so no status code is available.
-            Assert.IsNull(thrownException.StatusCode);
+            Assert.IsNull(thrownException!.StatusCode);
             Assert.IsTrue(thrownException.IsConnectivityFailure);
             Assert.IsFalse(thrownException.IsServerError);
             Assert.AreEqual(request.Url, thrownException.Url);
@@ -232,12 +228,7 @@ namespace osu.Framework.Tests.IO
             bool hasThrown = false;
             request.Failed += exception => hasThrown = exception != null;
 
-            WebRequestException thrownException;
-
-            if (async)
-                thrownException = Assert.ThrowsAsync<WebRequestException>(() => request.PerformAsync());
-            else
-                thrownException = Assert.Throws<WebRequestException>(request.Perform);
+            var thrownException = async ? Assert.ThrowsAsync<WebRequestException>(() => request.PerformAsync()) : Assert.Throws<WebRequestException>(request.Perform);
 
             Assert.IsTrue(request.Completed);
             Assert.IsTrue(request.Aborted);
@@ -246,7 +237,7 @@ namespace osu.Framework.Tests.IO
 
             // the exception carries the status code the server responded with (the exact code depends on the httpbin deployment),
             // which must never be mistaken for a connectivity failure.
-            Assert.IsNotNull(thrownException.StatusCode);
+            Assert.IsNotNull(thrownException!.StatusCode);
             Assert.AreEqual(request.ResponseStatusCode, thrownException.StatusCode);
             Assert.IsFalse(thrownException.IsConnectivityFailure);
             Assert.AreEqual(WebExceptionStatus.ProtocolError, thrownException.Status);
@@ -777,7 +768,7 @@ namespace osu.Framework.Tests.IO
                 If set to above two, the deadlock will not reliably reproduce.
 
                 Also note that the TPL thread pool generally gets much higher values than this (based on logical core count) and will expand with demand.
-                This is explicitly testing for a case that came up on Github Actions due to limited processor count and refusal to expand the thread pool (for whatever reason).
+                This is explicitly testing for a case that came up on GitHub Actions due to limited processor count and refusal to expand the thread pool (for whatever reason).
 
                 This may require adjustment in the future if we end up using more thread pool threads in the background, or if NUnit changes how they used them.
                 */

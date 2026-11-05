@@ -50,12 +50,13 @@ namespace osu.Framework.Tests.IO
 
         [Test]
         public void TestConnectivityFailure([Values(
-            WebExceptionStatus.Timeout,
-            WebExceptionStatus.ConnectFailure,
-            WebExceptionStatus.NameResolutionFailure,
-            WebExceptionStatus.ConnectionClosed,
-            WebExceptionStatus.ReceiveFailure,
-            WebExceptionStatus.SecureChannelFailure)] WebExceptionStatus status)
+                                                WebExceptionStatus.Timeout,
+                                                WebExceptionStatus.ConnectFailure,
+                                                WebExceptionStatus.NameResolutionFailure,
+                                                WebExceptionStatus.ConnectionClosed,
+                                                WebExceptionStatus.ReceiveFailure,
+                                                WebExceptionStatus.SecureChannelFailure)]
+                                            WebExceptionStatus status)
         {
             var exception = new WebRequestException("https://example.com/api", status, "failure");
 
