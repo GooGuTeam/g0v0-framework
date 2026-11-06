@@ -278,7 +278,7 @@ namespace osu.Framework.Tests.Graphics
 
                 if (count > 0)
                 {
-                    renderer.DrawBatchVertices(PrimitiveTopology.Triangles, 0, count);
+                    renderer.DrawBatchVertices(PrimitiveTopology.Triangles, 0, count, false);
                     DrawCounts.Add(count);
                 }
 

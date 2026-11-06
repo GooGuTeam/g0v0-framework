@@ -147,7 +147,7 @@ namespace osu.Framework.Graphics.OpenGL.Buffers
         public void DrawRange(int startIndex, int endIndex)
         {
             Bind(true);
-            Renderer.DrawBatchVertices(Topology, ToElementIndex(startIndex), ToElements(endIndex - startIndex));
+            Renderer.DrawBatchVertices(Topology, ToElementIndex(startIndex), ToElements(endIndex - startIndex), false);
         }
 
         public void Update()

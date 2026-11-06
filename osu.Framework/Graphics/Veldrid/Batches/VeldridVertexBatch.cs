@@ -190,7 +190,7 @@ namespace osu.Framework.Graphics.Veldrid.Batches
 
             renderer.BindVertexBuffer(buffer);
             renderer.BindIndexBuffer(indexLayout, Size);
-            renderer.DrawBatchVertices(primitiveType, drawStartIndex, countToDraw);
+            renderer.DrawBatchVertices(primitiveType, drawStartIndex, countToDraw, typeof(T) == typeof(TexturedVertex2D));
 
             // When using multiple buffers we advance to the next one with every draw to prevent contention on the same buffer with future vertex updates.
             synchronisationBeginIndex = -1;

@@ -41,6 +41,23 @@ Build configurations for the recommended IDEs (listed above) are included. You s
 
 Code analysis can be run with `powershell ./InspectCode.ps1` or `InspectCode.sh`.
 
+### Per-vertex masking
+
+The default texture shader reads masking parameters from each primitive's masking-buffer entry. Mask-only changes therefore
+leave the global masking uniforms dirty without uploading another global buffer on every glow blend switch. Direct draws,
+other vertex formats and shaders which read global masking uniforms still receive the current masking state before drawing.
+This preserves draw order, blend modes, rounded clipping and borders while reducing uniform uploads in dense timelines.
+
+GPU readback comparisons in `PerVertexMaskingGpuTest` cover the per-vertex and global-uniform paths on Veldrid and OpenGL.
+These explicit tests require a graphics device and must be selected by exact test name, for example:
+
+```sh
+dotnet test osu.Framework.Tests/bin/Debug/net10.0/osu.Framework.Tests.dll --filter "FullyQualifiedName=osu.Framework.Tests.Graphics.PerVertexMaskingGpuTest.TestGLMatchesGlobalUniforms|FullyQualifiedName=osu.Framework.Tests.Graphics.PerVertexMaskingGpuTest.TestVeldridMatchesGlobalUniforms|FullyQualifiedName=osu.Framework.Tests.Graphics.PerVertexMaskingGpuTest.TestVeldridRefreshesGlobalUniformsAfterDeferredMasking" -- NUnit.ExplicitMode=Relaxed
+```
+
+The OpenGL test runs both differential scenes within one context; the Veldrid fallback test also checks that switching from
+stamped vertices to a global-uniform shader consumes the latest mask, including when that mask has not changed at the switch.
+
 ## Contributing
 
 Contributions can be made via pull requests to this repository.
