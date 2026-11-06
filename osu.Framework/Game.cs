@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
@@ -69,6 +69,8 @@ namespace osu.Framework
 
         private readonly Container overlayContent;
 
+        private readonly ToolWindowContainer toolWindowContainer;
+
         private DrawVisualiser drawVisualiser;
 
         private TextureVisualiser textureVisualiser;
@@ -122,6 +124,13 @@ namespace osu.Framework
                     TargetDrawSize = new Vector2(1280, 960),
                     RelativeSizeAxes = Axes.Both,
                 }
+            });
+
+            // all tool windows share a single layer so that they can be freely stacked above each other.
+            // the layer itself is placed in front of the log overlay, which sits at `float.MinValue / 2`.
+            overlayContent.Add(toolWindowContainer = new ToolWindowContainer
+            {
+                Depth = -1
             });
         }
 
@@ -311,8 +320,6 @@ namespace osu.Framework
 
         private Bindable<ExecutionMode> executionMode;
 
-        private float currentOverlayDepth;
-
         public bool OnPressed(KeyBindingPressEvent<FrameworkAction> e)
         {
             if (e.Repeat)
@@ -331,12 +338,11 @@ namespace osu.Framework
                         LoadComponentAsync(drawVisualiser = new DrawVisualiser
                         {
                             State = { Value = Visibility.Visible },
-                            Depth = getNextFrontMostOverlayDepth(),
                             ToolPosition = getCascadeLocation(0),
-                        }, overlayContent.Add);
+                        }, toolWindowContainer.Add);
                     }
                     else
-                        toggleOverlay(drawVisualiser);
+                        drawVisualiser.ToggleVisibility();
 
                     return true;
 
@@ -348,11 +354,10 @@ namespace osu.Framework
                         {
                             State = { Value = Visibility.Visible },
                             Position = getCascadeLocation(1),
-                            Depth = getNextFrontMostOverlayDepth(),
-                        }, overlayContent.Add);
+                        }, toolWindowContainer.Add);
                     }
                     else
-                        toggleOverlay(globalStatistics);
+                        globalStatistics.ToggleVisibility();
 
                     return true;
 
@@ -364,11 +369,10 @@ namespace osu.Framework
                         {
                             State = { Value = Visibility.Visible },
                             Position = getCascadeLocation(2),
-                            Depth = getNextFrontMostOverlayDepth(),
-                        }, overlayContent.Add);
+                        }, toolWindowContainer.Add);
                     }
                     else
-                        toggleOverlay(textureVisualiser);
+                        textureVisualiser.ToggleVisibility();
 
                     return true;
 
@@ -379,11 +383,10 @@ namespace osu.Framework
                         {
                             State = { Value = Visibility.Visible },
                             Position = getCascadeLocation(3),
-                            Depth = getNextFrontMostOverlayDepth(),
-                        }, overlayContent.Add);
+                        }, toolWindowContainer.Add);
                     }
                     else
-                        toggleOverlay(audioMixerVisualiser);
+                        audioMixerVisualiser.ToggleVisibility();
 
                     return true;
 
@@ -437,16 +440,6 @@ namespace osu.Framework
                     break;
             }
         }
-
-        private void toggleOverlay(OverlayContainer overlay)
-        {
-            overlay.ToggleVisibility();
-
-            if (overlay.State.Value == Visibility.Visible)
-                overlayContent.ChangeChildDepth(overlay, getNextFrontMostOverlayDepth());
-        }
-
-        private float getNextFrontMostOverlayDepth() => currentOverlayDepth -= 0.01f;
 
         public void OnReleased(KeyBindingReleaseEvent<FrameworkAction> e)
         {

@@ -2,6 +2,7 @@
 // See the LICENCE-OSU file in the repository root for full licence text.
 
 using System;
+using osu.Framework.Graphics.Sprites;
 using osuTK.Graphics;
 
 namespace osu.Framework.Testing.Drawables.Steps
@@ -9,6 +10,8 @@ namespace osu.Framework.Testing.Drawables.Steps
     public partial class LabelStep : StepButton
     {
         public new required Action<LabelStep> Action { get; init; }
+
+        protected override IconUsage DefaultIcon => FontAwesome.Solid.Vial;
 
         protected override Color4 IdleColour => new Color4(77, 77, 77, 255);
 

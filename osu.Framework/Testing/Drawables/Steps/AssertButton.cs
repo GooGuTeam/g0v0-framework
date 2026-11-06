@@ -6,12 +6,15 @@ using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using NUnit.Framework;
+using osu.Framework.Graphics.Sprites;
 using osuTK.Graphics;
 
 namespace osu.Framework.Testing.Drawables.Steps
 {
     public partial class AssertButton : StepButton
     {
+        protected override IconUsage DefaultIcon => FontAwesome.Solid.Search;
+
         public required StackTrace CallStack { get; init; }
         public required Func<bool> Assertion { get; init; }
         public Func<string>? GetFailureMessage { get; init; }

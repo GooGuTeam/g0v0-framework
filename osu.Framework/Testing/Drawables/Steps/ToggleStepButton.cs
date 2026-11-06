@@ -3,6 +3,7 @@
 
 using System;
 using osu.Framework.Graphics;
+using osu.Framework.Graphics.Sprites;
 using osuTK.Graphics;
 
 namespace osu.Framework.Testing.Drawables.Steps
@@ -16,6 +17,8 @@ namespace osu.Framework.Testing.Drawables.Steps
 
         public override int RequiredRepetitions => 2;
 
+        protected override IconUsage DefaultIcon => FontAwesome.Solid.ToggleOff;
+
         private bool state;
 
         public ToggleStepButton()
@@ -27,6 +30,7 @@ namespace osu.Framework.Testing.Drawables.Steps
         private void clickAction()
         {
             state = !state;
+            SpriteIcon.Icon = state ? FontAwesome.Solid.ToggleOn : FontAwesome.Solid.ToggleOff;
             Light.FadeColour(state ? on_colour : off_colour);
             Action(state);
 
