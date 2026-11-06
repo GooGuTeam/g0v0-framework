@@ -26,6 +26,8 @@ namespace osu.Framework.Tests.Graphics
     /// Per-vertex masking renders the same pixels as global masking uniforms (up to one rounding step at anti-aliased edges), while masking changes no longer split batches.
     /// The scene covers rotated and nested masks, a mask wider than its parent's scissor, borders, a hollow edge effect,
     /// depth writes (which fall back to hardware clipping), disabled scissor, and drawing into an offset frame buffer.
+    /// A second scene switches from stamped vertices to a texture shader that reads the global uniforms and back, so the masking
+    /// uniform updates deferred while per-vertex masking is in use are applied before that fallback draws.
     /// </summary>
     [TestFixture]
     public class PerVertexMaskingGpuTest
@@ -34,7 +36,21 @@ namespace osu.Framework.Tests.Graphics
 
         [Test]
         [Explicit("Requires an offline graphics device and GPU readback.")]
-        public void TestVeldridMatchesGlobalUniforms()
+        public void TestVeldridMatchesGlobalUniforms() => runVeldrid(compare);
+
+        [Test]
+        [Explicit("Requires an OpenGL context.")]
+        public void TestGLMatchesGlobalUniforms() => runGL(renderer =>
+        {
+            compare(renderer);
+            compareGlobalFallback(renderer);
+        });
+
+        [Test]
+        [Explicit("Requires an offline graphics device and GPU readback.")]
+        public void TestVeldridRefreshesGlobalUniformsAfterDeferredMasking() => runVeldrid(compareGlobalFallback);
+
+        private static void runVeldrid(Action<Renderer> action)
         {
             bool wasDrawThread = ThreadSafety.IsDrawThread;
             ThreadSafety.IsDrawThread = true;
@@ -43,7 +59,7 @@ namespace osu.Framework.Tests.Graphics
             try
             {
                 renderer.InitialiseOffline(size, size);
-                compare(renderer);
+                action(renderer);
             }
             finally
             {
@@ -53,9 +69,7 @@ namespace osu.Framework.Tests.Graphics
             }
         }
 
-        [Test]
-        [Explicit("Requires an OpenGL context.")]
-        public void TestGLMatchesGlobalUniforms()
+        private static void runGL(Action<Renderer> action)
         {
             bool wasDrawThread = ThreadSafety.IsDrawThread;
             ThreadSafety.IsDrawThread = true;
@@ -67,7 +81,7 @@ namespace osu.Framework.Tests.Graphics
 
                 var renderer = new GLRenderer();
                 ((IRenderer)renderer).Initialise(((IWindow)window).GraphicsSurface);
-                compare(renderer);
+                action(renderer);
             }
             finally
             {
@@ -101,6 +115,64 @@ namespace osu.Framework.Tests.Graphics
                 Assert.That(reference.Zip(perVertex).All(p => maxChannelDifference(p.First, p.Second) <= 1), Is.True);
                 Assert.That(different, Is.LessThanOrEqualTo(8));
                 Assert.That(perVertexFlushes, Is.LessThan(referenceFlushes));
+                Assert.That(perVertex, Has.Some.Matches<Rgba32>(pixel => pixel.R > 0 || pixel.G > 0 || pixel.B > 0));
+            }
+            finally
+            {
+                PerVertexMasking.Enabled = wasEnabled;
+            }
+        }
+
+        /// <summary>
+        /// Renders the same frame with and without per-vertex masking, where masking changes are made while the bound shader reads
+        /// them from stamped vertices, before switching to a texture shader that has not opted in and reads the global uniforms,
+        /// and back. The global uniform block is only allowed to stay stale for as long as nothing reads it, so the fallback must
+        /// see the masking state current at its own draw rather than the one that was uploaded before the stamped draws.
+        /// </summary>
+        private static void compareGlobalFallback(Renderer renderer)
+        {
+            bool wasEnabled = PerVertexMasking.Enabled;
+
+            try
+            {
+                PerVertexMasking.Enabled = false;
+                var reference = renderGlobalFallback(renderer);
+
+                PerVertexMasking.Enabled = true;
+                var perVertex = renderGlobalFallback(renderer);
+
+                int different = 0;
+                int largestDifference = 0;
+                int worstIndex = -1;
+
+                for (int i = 0; i < reference.Length; i++)
+                {
+                    int difference = maxChannelDifference(reference[i], perVertex[i]);
+
+                    if (difference == 0)
+                        continue;
+
+                    different++;
+
+                    if (difference > largestDifference)
+                    {
+                        largestDifference = difference;
+                        worstIndex = i;
+                    }
+                }
+
+                TestContext.Progress.WriteLine($"{renderer.GetType().Name}: differing pixels {different}, largest channel difference {largestDifference}");
+
+                if (worstIndex >= 0)
+                {
+                    TestContext.Progress.WriteLine(
+                        $"  ({worstIndex % size}, {worstIndex / size}): {reference[worstIndex].R},{reference[worstIndex].G},{reference[worstIndex].B},{reference[worstIndex].A}"
+                        + $" -> {perVertex[worstIndex].R},{perVertex[worstIndex].G},{perVertex[worstIndex].B},{perVertex[worstIndex].A}");
+                }
+
+                // A global block that was never refreshed clips the fallback draws against an older mask, which changes pixels by far more than rounding.
+                Assert.That(largestDifference, Is.LessThanOrEqualTo(1), "the global-mask fallback did not render with the masking state that was current when it drew");
+
                 Assert.That(perVertex, Has.Some.Matches<Rgba32>(pixel => pixel.R > 0 || pixel.G > 0 || pixel.B > 0));
             }
             finally
@@ -256,6 +328,137 @@ namespace osu.Framework.Tests.Graphics
             using var image = renderer.ExtractFrameBufferData(target);
             Assert.That(image, Is.Not.Null);
             return image!.Pixels.ToArray();
+        }
+
+        /// <summary>
+        /// Renders a frame that starts with vertices stamped with their masking entry, switches to a texture shader that has not
+        /// opted in (and therefore reads the global uniforms) and switches back. Masking parameters change for the stamped draws
+        /// before each switch but not between them and the fallback draws, so the fallback is only correct if the stamped draws
+        /// left the global uniforms pending.
+        /// </summary>
+        private static Rgba32[] renderGlobalFallback(Renderer renderer)
+        {
+            bool perVertexEnabled = PerVertexMasking.Enabled;
+
+            // A fallback consumer is an ordinary texture shader compiled without the opt-in, as an older cache or a device without
+            // the masking buffer inputs would provide.
+            using var fallbackShaders = new ShaderManager(renderer, new NamespacedResourceStore<byte[]>(new DllResourceStore(typeof(Game).Assembly), "Resources/Shaders"));
+
+            IShader fallbackShader;
+
+            PerVertexMasking.Enabled = false;
+
+            try
+            {
+                fallbackShader = fallbackShaders.Load(VertexShaderDescriptor.TEXTURE_2, FragmentShaderDescriptor.TEXTURE);
+            }
+            finally
+            {
+                PerVertexMasking.Enabled = perVertexEnabled;
+            }
+
+            Assert.That(((IPerVertexMaskingShader)fallbackShader).UsesPerVertexMasking, Is.False);
+
+            using var perVertexShaders = perVertexEnabled
+                ? new ShaderManager(renderer, new NamespacedResourceStore<byte[]>(new DllResourceStore(typeof(Game).Assembly), "Resources/Shaders"))
+                : null;
+
+            IShader stampedShader = fallbackShader;
+
+            if (perVertexShaders != null)
+            {
+                stampedShader = perVertexShaders.Load(VertexShaderDescriptor.TEXTURE_2, FragmentShaderDescriptor.TEXTURE);
+                Assert.That(((IPerVertexMaskingShader)stampedShader).UsesPerVertexMasking, Is.True);
+            }
+
+            renderer.BeginFrame(new Vector2(size));
+
+            using var target = renderer.CreateFrameBuffer();
+            target.Size = new Vector2(size);
+
+            target.Bind();
+            renderer.Clear(new ClearInfo(Color4.Black));
+            renderer.SetBlend(BlendingParameters.Mixture);
+
+            stampedShader.Bind();
+
+            // The first batch flush (the first blend switch below) uploads the global uniforms once, so a deferred block keeps
+            // only this mask. Every other region of the scene lies outside it: a fallback served stale uniforms would clip its
+            // draws to this mask instead.
+            renderer.PushMaskingInfo(mask(new RectangleF(4, 2, 36, 32), Matrix3.Identity, 8, 0));
+            draw(renderer, new Quad(0, 0, 44, 36), new Color4(0.9f, 0.2f, 0.1f, 1));
+            renderer.PopMaskingInfo();
+
+            // Glow-style masking: the masking state keeps changing while the blend keeps switching, which flushes the batch.
+            for (int i = 0; i < 5; i++)
+            {
+                renderer.PushMaskingInfo(mask(new RectangleF(4 + i * 16, 50, 8, 26), Matrix3.Identity, 2, 0));
+                renderer.SetBlend(i % 2 == 0 ? BlendingParameters.Additive : BlendingParameters.Mixture);
+                draw(renderer, new Quad(i * 16, 46, 16, 34), new Color4(0.1f + i * 0.15f, 1, 0.3f, 1));
+                renderer.PopMaskingInfo();
+            }
+
+            renderer.SetBlend(BlendingParameters.Mixture);
+
+            renderer.PushMaskingInfo(mask(new RectangleF(56, 2, 36, 28), Matrix3.Identity, 10, 3));
+            draw(renderer, new Quad(52, 0, 44, 34), new Color4(0.2f, 0.9f, 0.3f, 1));
+            renderer.PopMaskingInfo();
+
+            // A mask is applied by stamped vertices that it clips away, so nothing is drawn under it yet. Switching to the consumer
+            // that reads the global uniforms without changing the masking state must still upload them, because the stamped draws
+            // instead leave them pending.
+            var fallbackMask = mask(new RectangleF(84, 44, 40, 40), Matrix3.Identity, 10, 4);
+
+            renderer.PushMaskingInfo(fallbackMask);
+            draw(renderer, new Quad(-64, -64, 8, 8), new Color4(0.5f, 0.5f, 0.5f, 1));
+
+            stampedShader.Unbind();
+            fallbackShader.Bind();
+
+            draw(renderer, new Quad(74, 36, 58, 56), new Color4(0.2f, 0.9f, 0.85f, 1));
+            renderer.PopMaskingInfo();
+
+            // Unmasked, which a stale "masking active" block would clip away entirely.
+            draw(renderer, new Quad(2, 88, 24, 20), new Color4(0.95f, 0.95f, 0.3f, 1));
+
+            // Back to stamped vertices, whose masking entries take over from the global uniforms again.
+            fallbackShader.Unbind();
+            stampedShader.Bind();
+
+            renderer.PushMaskingInfo(mask(new RectangleF(102, 4, 22, 18), Matrix3.Identity, 6, 0));
+            draw(renderer, new Quad(98, 0, 28, 24), new Color4(0.4f, 0.4f, 1, 1));
+            renderer.PopMaskingInfo();
+
+            renderer.PushMaskingInfo(mask(new RectangleF(40, 96, 60, 24), Matrix3.Identity, 6, 2));
+            draw(renderer, new Quad(34, 94, 72, 30), new Color4(1, 0.5f, 0.9f, 1));
+            renderer.PopMaskingInfo();
+
+            // And back once more, again without a masking change between the stamped draw and the fallback draw.
+            renderer.PushMaskingInfo(mask(new RectangleF(2, 110, 20, 14), Matrix3.Identity, 4, 0));
+            draw(renderer, new Quad(-64, -64, 8, 8), new Color4(0.5f, 0.5f, 0.5f, 1));
+
+            stampedShader.Unbind();
+            fallbackShader.Bind();
+
+            draw(renderer, new Quad(0, 104, 34, 24), new Color4(0.9f, 0.9f, 0.9f, 1));
+            renderer.PopMaskingInfo();
+
+            fallbackShader.Unbind();
+
+            renderer.FinishFrame();
+
+            renderer.WaitUntilIdle();
+            using var image = renderer.ExtractFrameBufferData(target);
+            Assert.That(image, Is.Not.Null);
+
+            // The fallback draws are the only content under this mask, so a blank centre would make the comparison vacuous.
+            int fallbackX = (int)(fallbackMask.MaskingRect.X + fallbackMask.MaskingRect.Width / 2);
+            int fallbackY = (int)(fallbackMask.MaskingRect.Y + fallbackMask.MaskingRect.Height / 2);
+            var fallbackCentre = image!.Pixels[fallbackY * size + fallbackX];
+
+            Assert.That(fallbackCentre.R + fallbackCentre.G + fallbackCentre.B, Is.GreaterThan(0), "the global-mask fallback drew nothing under its mask");
+
+            return image.Pixels.ToArray();
         }
 
         private static int maxChannelDifference(Rgba32 a, Rgba32 b)

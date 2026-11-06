@@ -404,6 +404,7 @@ namespace osu.Framework.Graphics.Rendering
         private bool maskingStatePending;
         private int lastActiveTextureUnit;
         private bool globalUniformsChanged;
+        private bool maskingUniformsChanged;
 
         private static readonly GlobalStatistic<int>[] flush_source_statistics;
 
@@ -980,7 +981,7 @@ namespace osu.Framework.Graphics.Rendering
             if (maskChanged || scissorChanged || appliedMaskingEntry < 0)
             {
                 appendMaskingEntry();
-                globalUniformsChanged = true;
+                maskingUniformsChanged = true;
             }
 
             if (hardwareScissorChanged)
@@ -1788,12 +1789,12 @@ namespace osu.Framework.Graphics.Rendering
         public void DrawVertices(PrimitiveTopology topology, int vertexStart, int verticesCount)
         {
             ApplyPendingMaskingState();
-            DrawBatchVertices(topology, vertexStart, verticesCount);
+            DrawBatchVertices(topology, vertexStart, verticesCount, false);
         }
 
         // Buffered vertices retain the clipping state from submission, even if the logical
         // masking stack has since changed. Do not apply pending state while flushing them.
-        internal void DrawBatchVertices(PrimitiveTopology topology, int vertexStart, int verticesCount)
+        internal void DrawBatchVertices(PrimitiveTopology topology, int vertexStart, int verticesCount, bool hasMaskingIndices)
         {
             if (Shader == null)
                 throw new InvalidOperationException("No shader bound.");
@@ -1802,7 +1803,12 @@ namespace osu.Framework.Graphics.Rendering
             if (isDefaultTextureShaderBound)
                 fillEmptyTextureSlots();
 
-            if (globalUniformsChanged)
+            // The default texture shader reads masking data from stamped vertices. Keep its global masking fallback dirty
+            // until a direct draw, another vertex format or another shader actually needs it. In particular, glow blend
+            // switches must not upload a new global uniform buffer for every per-primitive masking entry.
+            bool usesMaskingIndices = hasMaskingIndices && isDefaultTextureShaderBound && Shader is IPerVertexMaskingShader { UsesPerVertexMasking: true };
+
+            if (globalUniformsChanged || (maskingUniformsChanged && !usesMaskingIndices))
             {
                 globalUniformBuffer!.Data = new GlobalUniformData
                 {
@@ -1859,6 +1865,7 @@ namespace osu.Framework.Graphics.Rendering
                 };
 
                 globalUniformsChanged = false;
+                maskingUniformsChanged = false;
             }
 
             Shader.BindUniformBlock("g_GlobalUniforms", globalUniformBuffer!);
