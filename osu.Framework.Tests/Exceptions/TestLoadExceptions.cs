@@ -392,6 +392,30 @@ namespace osu.Framework.Tests.Exceptions
         }
 
         /// <summary>
+        /// A failure in the regular update of a component is not a load failure, and still surfaces to the host rather than being isolated.
+        /// </summary>
+        /// <remarks>
+        /// The load-complete phase runs in the same pass, immediately before <see cref="Drawable.Update"/> (both from
+        /// <see cref="Drawable.UpdateSubTree"/>), so the isolation has to tell the two apart. Only the former is a load failure; swallowing a
+        /// runtime failure would hide bugs from developers, which is the opposite of the point.
+        /// </remarks>
+        [Test]
+        public void TestUpdateExceptionIsNotIsolated()
+        {
+            LoadErrorHandling.Enabled = true;
+
+            var target = new IsolationTarget(new FailsOnUpdate());
+
+            // the exit condition is a backstop: if the failure were isolated instead of rethrown, the game would otherwise run until the test
+            // times out, which reports far less than "the exception did not propagate".
+            int frames = 0;
+
+            var exception = Assert.Catch(() => runGameWithLogic(g => g.Add(target), _ => ++frames > 100));
+
+            Assert.IsInstanceOf<AsyncTestException>(exception is AggregateException aggregate ? aggregate.AsSingular() : exception);
+        }
+
+        /// <summary>
         /// A placeholder which itself fails to load must not recurse into creating further placeholders, or throw.
         /// </summary>
         [Test]
@@ -544,6 +568,14 @@ namespace osu.Framework.Tests.Exceptions
         public partial class FailsOnLoadComplete : CompositeDrawable
         {
             protected override void LoadComplete() => throw new AsyncTestException();
+        }
+
+        /// <summary>
+        /// A component which loads successfully, then throws from its first regular update.
+        /// </summary>
+        public partial class FailsOnUpdate : CompositeDrawable
+        {
+            protected override void Update() => throw new AsyncTestException();
         }
 
         public partial class DelayedTestBoxAsync : Box

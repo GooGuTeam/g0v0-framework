@@ -3,9 +3,6 @@
 
 #include "sh_Utils.h"
 
-#undef INV_SQRT_2PI
-#define INV_SQRT_2PI 0.39894
-
 layout(location = 2) in mediump vec2 v_TexCoord;
 
 layout(std140, set = 0, binding = 0) uniform m_BlurParameters
@@ -21,27 +18,33 @@ layout(set = 1, binding = 1) uniform lowp sampler m_Sampler;
 
 layout(location = 0) out vec4 o_Colour;
 
-mediump float computeGauss(in mediump float x, in mediump float sigma)
-{
-	return INV_SQRT_2PI * exp(-0.5*x*x / (sigma*sigma)) / sigma;
-}
-
 lowp vec4 blur(int radius, highp vec2 direction, mediump vec2 texCoord, mediump vec2 texSize, mediump float sigma)
 {
-	mediump float factor = computeGauss(0.0, sigma);
-	mediump vec4 sum = texture(sampler2D(m_Texture, m_Sampler), texCoord) * factor;
+	// Gaussian weights are evaluated relative to the centre tap: the 1/(sqrt(2pi)*sigma) normalisation cancels in sum / totalFactor.
+	// Taps sit at x = i - 0.5 for i = 2, 4, ..., so successive weights exp(-x^2 / (2 sigma^2)) differ by a ratio which itself
+	// shrinks by a constant factor each step. This replaces one exp() and two divisions per tap with three multiplications.
+	highp float invSigmaSq = 1.0 / (sigma * sigma);
+	highp float weight = exp(-1.125 * invSigmaSq); // x = 1.5
+	highp float ratio = exp(-5.0 * invSigmaSq);    // weight(x + 2) / weight(x) at x = 1.5
+	highp float ratioStep = exp(-4.0 * invSigmaSq);
 
-	mediump float totalFactor = factor;
+	highp vec2 texelStep = direction / texSize;
+
+	mediump vec4 sum = texture(sampler2D(m_Texture, m_Sampler), texCoord);
+	highp float totalFactor = 1.0;
 
 	for (int i = 2; i <= 200; i += 2)
 	{
-		mediump float x = float(i) - 0.5;
-		factor = computeGauss(x, sigma) * 2.0;
+		highp float factor = weight * 2.0;
+		highp vec2 offset = texelStep * (float(i) - 0.5);
 		totalFactor += 2.0 * factor;
-		sum += texture(sampler2D(m_Texture, m_Sampler), texCoord + direction * x / texSize) * factor;
-		sum += texture(sampler2D(m_Texture, m_Sampler), texCoord - direction * x / texSize) * factor;
+		sum += texture(sampler2D(m_Texture, m_Sampler), texCoord + offset) * factor;
+		sum += texture(sampler2D(m_Texture, m_Sampler), texCoord - offset) * factor;
 		if (i >= radius)
 			break;
+
+		weight *= ratio;
+		ratio *= ratioStep;
 	}
 
 	// this is supposed to be unnecessary with https://github.com/ppy/veldrid-spirv/pull/4,

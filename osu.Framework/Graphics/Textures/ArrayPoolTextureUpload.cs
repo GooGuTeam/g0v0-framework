@@ -1,12 +1,13 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
 using System;
 using System.Buffers;
+using System.Threading;
 using osu.Framework.Graphics.Primitives;
-using SixLabors.ImageSharp.PixelFormats;
+using osu.Framework.Imaging;
 
 namespace osu.Framework.Graphics.Textures
 {
@@ -14,7 +15,8 @@ namespace osu.Framework.Graphics.Textures
     {
         private readonly ArrayPool<Rgba32> arrayPool;
 
-        private readonly Rgba32[] data;
+        private Rgba32[] data;
+        private readonly int length;
 
         /// <summary>
         /// Create an empty raw texture with an efficient shared memory backing.
@@ -24,18 +26,31 @@ namespace osu.Framework.Graphics.Textures
         /// <param name="arrayPool">The source pool to retrieve memory from. Shared default is used if null.</param>
         public ArrayPoolTextureUpload(int width, int height, ArrayPool<Rgba32> arrayPool = null)
         {
+            ArgumentOutOfRangeException.ThrowIfNegative(width);
+            ArgumentOutOfRangeException.ThrowIfNegative(height);
+            length = checked(width * height);
             this.arrayPool = arrayPool ?? ArrayPool<Rgba32>.Shared;
-            data = this.arrayPool.Rent(width * height);
+            data = this.arrayPool.Rent(length);
         }
 
         public void Dispose()
         {
-            arrayPool.Return(data);
+            var rented = Interlocked.Exchange(ref data, null);
+            if (rented != null)
+                arrayPool.Return(rented);
         }
 
-        public Span<Rgba32> RawData => data;
+        public Span<Rgba32> RawData
+        {
+            get
+            {
+                var rented = data;
+                ObjectDisposedException.ThrowIf(rented == null, this);
+                return rented.AsSpan(0, length);
+            }
+        }
 
-        public ReadOnlySpan<Rgba32> Data => data;
+        public ReadOnlySpan<Rgba32> Data => RawData;
 
         public int Level { get; set; }
 

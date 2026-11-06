@@ -19,17 +19,27 @@ namespace osu.Framework.IO.Stores
 {
     public class FontStore : TextureStore, ITexturedGlyphLookupStore
     {
+        // High-resolution glyphs otherwise split short text runs across many small sprite atlases.
+        // Larger pages trade initialisation and whole-page mipmap costs for fewer texture switches.
+        private const int font_atlas_size = 4096;
+
         private readonly List<IGlyphStore> glyphStores = new List<IGlyphStore>();
 
         private readonly List<ITexturedGlyphLookupStore> nestedFontStores = new List<ITexturedGlyphLookupStore>();
 
         private Storage cacheStorage;
+        private readonly bool lowResolutionFonts;
+
+        public TexturePixelFormat AtlasTextureFormat => Atlas?.TextureFormat ?? TexturePixelFormat.R8G8B8A8Float;
 
         /// <summary>
         /// A local cache to avoid string allocation overhead. Can be changed to (string,char)=>string if this ever becomes an issue,
         /// but as long as we directly inherit <see cref="TextureStore"/> this is a slight optimisation.
         /// </summary>
-        private readonly ConcurrentDictionary<(string, char), ITexturedCharacterGlyph> namespacedGlyphCache = new ConcurrentDictionary<(string, char), ITexturedCharacterGlyph>();
+        private readonly ConcurrentDictionary<(string, char, bool), ITexturedCharacterGlyph> namespacedGlyphCache = new ConcurrentDictionary<(string, char, bool), ITexturedCharacterGlyph>();
+
+        // Cache the owner, not its resolution: nested stores can have different native pixel sizes.
+        private readonly ConcurrentDictionary<(string, char), ITexturedGlyphLookupStore> nestedGlyphOwners = new ConcurrentDictionary<(string, char), ITexturedGlyphLookupStore>();
 
         /// <summary>
         /// Construct a font store to be added to a parent font store via <see cref="AddStore"/>.
@@ -57,15 +67,28 @@ namespace osu.Framework.IO.Stores
 
         internal FontStore(IRenderer renderer, IResourceStore<TextureUpload> store = null, float scaleAdjust = 100, bool useAtlas = false, Storage cacheStorage = null,
                            TextureFilteringMode filteringMode = TextureFilteringMode.Linear)
-            : base(renderer, store, scaleAdjust: scaleAdjust, useAtlas: useAtlas, filteringMode: filteringMode)
+            : base(renderer, store, scaleAdjust: scaleAdjust, useAtlas: false, filteringMode: filteringMode)
         {
             this.cacheStorage = cacheStorage;
+            lowResolutionFonts = (renderer as Renderer)?.LowResolutionFonts ?? false;
+
+            if (useAtlas)
+            {
+                int size = (renderer as Renderer)?.FontAtlasSize ?? Math.Min(font_atlas_size, renderer.MaxTextureSize);
+                bool singleChannel = (renderer as Renderer)?.SingleChannelFontAtlas ?? false;
+                Atlas = new TextureAtlas(renderer, size, size, (renderer as Renderer)?.FontAtlasPacking ?? AtlasPackingStrategy.Etagere,
+                    manualMipmaps: false, filteringMode: filteringMode,
+                    textureFormat: singleChannel ? TexturePixelFormat.R8Float : TexturePixelFormat.R8G8B8A8Float);
+            }
         }
 
         public override void AddTextureSource(IResourceStore<TextureUpload> store)
         {
             if (store is IGlyphStore gs)
             {
+                if (gs is GlyphStore bitmapGlyphStore)
+                    bitmapGlyphStore.LowResolutionTextures = lowResolutionFonts;
+
                 if (gs is RawCachingGlyphStore raw && raw.CacheStorage == null)
                     raw.CacheStorage = cacheStorage;
 
@@ -139,31 +162,42 @@ namespace osu.Framework.IO.Stores
             base.RemoveStore(store);
         }
 
-        public ITexturedCharacterGlyph Get(string fontName, char character)
+        public ITexturedCharacterGlyph Get(string fontName, char character) => GetForSize(fontName, character, 0);
+
+        internal ITexturedCharacterGlyph GetForSize(string fontName, char character, float fontSize)
         {
-            var key = (fontName, character);
+            bool highDefinition = !lowResolutionFonts && fontSize > ScaleAdjust && character >= ' ' && character <= '~';
+            var key = (fontName, character, highDefinition);
 
             if (namespacedGlyphCache.TryGetValue(key, out var existing))
                 return existing;
+
+            if (nestedGlyphOwners.TryGetValue((fontName, character), out var owner))
+                return owner?.GetForSize(fontName, character, fontSize);
 
             foreach (var store in glyphStores)
             {
                 if (store.FontName.EndsWith(fontName ?? string.Empty, StringComparison.Ordinal) && store.HasGlyph(character))
                 {
-                    string textureName = $"{store.FontName}/{character}";
+                    float textureScale = (store as GlyphStore)?.GetTextureScale(character, highDefinition) ?? 1;
+                    string textureName = textureScale > 1 ? $"{store.FontName}/{GlyphStore.HIGH_DEFINITION_PREFIX}{character}" : $"{store.FontName}/{character}";
                     return namespacedGlyphCache[key] = new TexturedCharacterGlyph(store.Get(character).AsNonNull(), Get(textureName), 1 / ScaleAdjust,
-                        (store as GlyphStore)?.GetTextureScale(character) ?? 1);
+                        textureScale);
                 }
             }
 
             foreach (var store in nestedFontStores)
             {
-                var glyph = store.Get(fontName, character);
+                var glyph = store.GetForSize(fontName, character, fontSize);
                 if (glyph != null)
-                    return namespacedGlyphCache[key] = glyph;
+                {
+                    nestedGlyphOwners[(fontName, character)] = store;
+                    return glyph;
+                }
             }
 
-            return namespacedGlyphCache[key] = null;
+            nestedGlyphOwners[(fontName, character)] = null;
+            return null;
         }
 
         public Task<ITexturedCharacterGlyph> GetAsync(string fontName, char character) => Task.Run(() => Get(fontName, character));

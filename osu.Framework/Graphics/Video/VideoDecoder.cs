@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
@@ -29,12 +29,15 @@ namespace osu.Framework.Graphics.Video
     /// <summary>
     /// Represents a video decoder that can be used convert video streams and files into textures.
     /// </summary>
+    /// <remarks>
+    /// Public members are virtual so a platform decoder can replace FFmpeg, delegating to this implementation where it cannot decode a stream.
+    /// </remarks>
     public unsafe class VideoDecoder : IDisposable
     {
         /// <summary>
         /// The duration of the video that is being decoded. Can only be queried after the decoder has started decoding has loaded. This value may be an estimate by FFmpeg, depending on the video loaded.
         /// </summary>
-        public double Duration { get; private set; }
+        public virtual double Duration { get; private set; }
 
         /// <summary>
         /// True if the decoder currently does not decode any more frames, false otherwise.
@@ -49,22 +52,22 @@ namespace osu.Framework.Graphics.Video
         /// <summary>
         /// The timestamp of the last frame that was decoded by this video decoder, or 0 if no frames have been decoded.
         /// </summary>
-        public float LastDecodedFrameTime => lastDecodedFrameTime;
+        public virtual float LastDecodedFrameTime => lastDecodedFrameTime;
 
         /// <summary>
         /// The frame rate of the video stream this decoder is decoding.
         /// </summary>
-        public double FrameRate => stream == null ? 0 : stream->avg_frame_rate.GetValue();
+        public virtual double FrameRate => stream == null ? 0 : stream->avg_frame_rate.GetValue();
 
         /// <summary>
         /// True if the decoder can seek, false otherwise. Determined by the stream this decoder was created with.
         /// </summary>
-        public bool CanSeek => videoStream?.CanSeek == true;
+        public virtual bool CanSeek => videoStream?.CanSeek == true;
 
         /// <summary>
         /// The current state of the decoding process.
         /// </summary>
-        public DecoderState State { get; private set; }
+        public virtual DecoderState State { get; private set; }
 
         /// <summary>
         /// Determines which hardware acceleration device(s) should be used.
@@ -172,7 +175,7 @@ namespace osu.Framework.Graphics.Video
         /// Seek the decoder to the given timestamp. This will fail if <see cref="CanSeek"/> is false.
         /// </summary>
         /// <param name="targetTimestamp">The timestamp to seek to.</param>
-        public void Seek(double targetTimestamp)
+        public virtual void Seek(double targetTimestamp)
         {
             if (!CanSeek)
                 throw new InvalidOperationException("This decoder cannot seek because the underlying stream used to decode the video does not support seeking.");
@@ -190,7 +193,7 @@ namespace osu.Framework.Graphics.Video
         /// Returns the given frames back to the decoder, allowing the decoder to reuse the textures contained in the frames to draw new frames.
         /// </summary>
         /// <param name="frames">The frames that should be returned to the decoder.</param>
-        public void ReturnFrames(IEnumerable<DecodedFrame> frames)
+        public virtual void ReturnFrames(IEnumerable<DecodedFrame> frames)
         {
             foreach (var f in frames)
             {
@@ -202,7 +205,7 @@ namespace osu.Framework.Graphics.Video
         /// <summary>
         /// Starts the decoding process. The decoding will happen asynchronously in a separate thread. The decoded frames can be retrieved by using <see cref="GetDecodedFrames"/>.
         /// </summary>
-        public void StartDecoding()
+        public virtual void StartDecoding()
         {
             if (decodingTask != null)
                 throw new InvalidOperationException($"Cannot start decoding once already started. Call {nameof(StopDecodingAsync)} first.");
@@ -231,7 +234,7 @@ namespace osu.Framework.Graphics.Video
         /// <summary>
         /// Stops the decoding process.
         /// </summary>
-        public Task StopDecodingAsync()
+        public virtual Task StopDecodingAsync()
         {
             if (decodingTask == null)
                 return Task.CompletedTask;
@@ -253,7 +256,7 @@ namespace osu.Framework.Graphics.Video
         /// Retrieving decoded frames using this method consumes them, ie calling this method again will never retrieve the same frame twice.
         /// </summary>
         /// <returns>The frames that have been decoded up until the point in time this method was called.</returns>
-        public IEnumerable<DecodedFrame> GetDecodedFrames()
+        public virtual IEnumerable<DecodedFrame> GetDecodedFrames()
         {
             var frames = new List<DecodedFrame>(decodedFrames.Count);
             while (decodedFrames.TryDequeue(out var df))
@@ -263,7 +266,7 @@ namespace osu.Framework.Graphics.Video
         }
 
         // https://en.wikipedia.org/wiki/YCbCr
-        public Matrix3 GetConversionMatrix()
+        public virtual Matrix3 GetConversionMatrix()
         {
             if (codecContext == null)
                 return Matrix3.Zero;

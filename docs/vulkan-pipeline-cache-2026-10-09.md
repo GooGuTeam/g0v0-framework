@@ -4,7 +4,7 @@ Local Veldrid now creates one VkPipelineCache per device, uses it for graphics a
 
 This supplements framework pipeline-object reuse: the framework avoids recreating identical pipeline objects, while VkPipelineCache allows the driver to reuse compilation data between different pipeline variants. Expected benefit is reduced pipeline creation work, not necessarily higher steady-state FPS. No measured performance improvement is claimed.
 
-Set `VELDRID_VK_PIPELINE_CACHE=0` before launch to disable cache creation/use for comparison. The default is enabled. Build with `-p:UseLocalVeldrid=true`; default packaged Veldrid is unchanged.
+Set `VELDRID_VK_PIPELINE_CACHE=0` before launch to disable cache creation/use for comparison. The default is enabled. Build with `-p:G0V0SourceVeldrid=true`; default packaged Veldrid is unchanged.
 
 ## Validation
 

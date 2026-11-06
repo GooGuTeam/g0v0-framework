@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using osu.Framework.Graphics.Textures;
@@ -10,8 +10,7 @@ using osu.Framework.Graphics.Rendering.Vertices;
 using osu.Framework.Platform;
 using osu.Framework.Threading;
 using osuTK.Graphics;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp;
+using osu.Framework.Imaging;
 
 namespace osu.Framework.Graphics.Rendering
 {
@@ -163,6 +162,11 @@ namespace osu.Framework.Graphics.Rendering
         /// The current depth of <see cref="TexturedVertex2D"/> vertices when drawn to the backbuffer.
         /// </summary>
         internal DepthValue BackbufferDepth { get; }
+
+        /// <summary>
+        /// Whether the currently bound framebuffer, or the backbuffer, has a depth attachment.
+        /// </summary>
+        internal bool TargetHasDepth { get; }
 
         /// <summary>
         /// Whether this <see cref="IRenderer"/> has been initialised using <see cref="Initialise"/>.
@@ -403,6 +407,10 @@ namespace osu.Framework.Graphics.Rendering
         /// <returns>The <see cref="Texture"/>.</returns>
         Texture CreateTexture(int width, int height, bool manualMipmaps = false, TextureFilteringMode filteringMode = TextureFilteringMode.Linear, WrapMode wrapModeS = WrapMode.None,
                               WrapMode wrapModeT = WrapMode.None, Color4? initialisationColour = null);
+
+        /// <summary>Creates a texture with an explicit pixel format.</summary>
+        Texture CreateTexture(int width, int height, bool manualMipmaps, TextureFilteringMode filteringMode, WrapMode wrapModeS, WrapMode wrapModeT,
+                              Color4? initialisationColour, TexturePixelFormat textureFormat);
 
         /// <summary>
         /// Creates a new video texture.

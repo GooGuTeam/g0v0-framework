@@ -2,10 +2,12 @@
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
+using osu.Framework.Configuration;
 using osu.Framework.Development;
 using osu.Framework.Allocation;
 using osu.Framework.Timing;
 using osu.Framework.Graphics.Veldrid;
+using osu.Framework.Platform;
 using osuTK;
 
 namespace osu.Framework.Graphics.Rendering
@@ -25,27 +27,42 @@ namespace osu.Framework.Graphics.Rendering
 
         public IRenderer Renderer
         {
-            get { checkAvailable(); return renderer; }
+            get
+            {
+                checkAvailable();
+                return renderer;
+            }
         }
 
         public global::Veldrid.GraphicsDevice Device
         {
-            get { checkAvailable(); return ((IVeldridRenderer)renderer).Device; }
+            get
+            {
+                checkAvailable();
+                return ((IVeldridRenderer)renderer).Device;
+            }
         }
 
-        public OfflineRenderContext(int width, int height)
+        /// <param name="width">The render width.</param>
+        /// <param name="height">The render height.</param>
+        /// <param name="shaderCacheStorage">Persists shader compilations. Passing the host's shader cache lets exports reuse its results.</param>
+        public OfflineRenderContext(int width, int height, Storage? shaderCacheStorage = null)
         {
             if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
                 throw new PlatformNotSupportedException(@"Offline rendering requires Windows, Linux or macOS.");
             if (width <= 0 || height <= 0 || width > 16384 || height > 16384 || (width & 1) != 0 || (height & 1) != 0)
                 throw new ArgumentOutOfRangeException(nameof(width), "Export size must be even and within device limits.");
+
             threadId = Environment.CurrentManagedThreadId;
             previousDrawThread = ThreadSafety.IsDrawThread;
             ThreadSafety.IsDrawThread = true;
             size = new Vector2(width, height);
             renderer = new VeldridRenderer();
+
             try
             {
+                FrameworkFeatureFlags.ApplyTo(renderer);
+                renderer.CacheStorage = shaderCacheStorage;
                 renderer.InitialiseOffline((uint)width, (uint)height);
             }
             catch
@@ -66,13 +83,37 @@ namespace osu.Framework.Graphics.Rendering
             scene.Load(clock, dependencies);
         }
 
+        /// <summary>
+        /// Keeps load errors propagating across several <see cref="UpdateScene"/> and <see cref="Render"/> calls,
+        /// which otherwise each enter and leave their own suppression scope.
+        /// </summary>
+        public IDisposable SuppressLoadErrorHandling()
+        {
+            checkAvailable();
+            return LoadErrorHandling.Suppress();
+        }
+
         public void UpdateScene(Drawable scene)
         {
             checkAvailable();
             bool previous = ThreadSafety.IsUpdateThread;
             ThreadSafety.IsUpdateThread = true;
             using var scope = LoadErrorHandling.Suppress();
+
             try { scene.UpdateSubTree(); }
+            finally { ThreadSafety.IsUpdateThread = previous; }
+        }
+
+        /// <summary>
+        /// Dispose a private scene. The export thread acts as the scene's update thread, so disposal may detach children.
+        /// </summary>
+        public void DisposeScene(Drawable scene)
+        {
+            checkAvailable();
+            bool previous = ThreadSafety.IsUpdateThread;
+            ThreadSafety.IsUpdateThread = true;
+
+            try { scene.Dispose(); }
             finally { ThreadSafety.IsUpdateThread = previous; }
         }
 
@@ -84,6 +125,7 @@ namespace osu.Framework.Graphics.Rendering
             DrawNode node;
             bool previous = ThreadSafety.IsUpdateThread;
             ThreadSafety.IsUpdateThread = true;
+
             try
             {
                 scene.UpdateSubTreeMasking();
@@ -93,10 +135,10 @@ namespace osu.Framework.Graphics.Rendering
             {
                 ThreadSafety.IsUpdateThread = previous;
             }
+
             renderer.BeginFrame(size);
             target.Draw(node);
             renderer.FinishFrame();
-            renderer.WaitUntilIdle();
         }
 
         public void Dispose()
@@ -104,7 +146,9 @@ namespace osu.Framework.Graphics.Rendering
             checkThread();
             if (disposed)
                 return;
+
             disposed = true;
+
             try
             {
                 renderer.DisposeOffline();

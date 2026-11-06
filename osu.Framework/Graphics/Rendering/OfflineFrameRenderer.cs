@@ -26,9 +26,11 @@ namespace osu.Framework.Graphics.Rendering
             requireDrawThread();
             if (width <= 0 || height <= 0 || (width & 1) != 0 || (height & 1) != 0)
                 throw new ArgumentException("Export dimensions must be positive even numbers.");
+
             this.renderer = renderer;
             bounds = new RectangleI(0, 0, width, height);
-            target = renderer.CreateFrameBuffer(TexturePixelFormat.R8G8B8A8Float);
+            // Paths drawn without framebuffers need depth.
+            target = renderer.CreateFrameBuffer(TexturePixelFormat.R8G8B8A8Float, Lines.Path.DirectDrawingEnabled ? [RenderBufferFormat.D16] : null);
             target.Size = new Vector2(width, height);
         }
 
@@ -43,6 +45,7 @@ namespace osu.Framework.Graphics.Rendering
                 ObjectDisposedException.ThrowIf(disposed, this);
                 if (target is not IVeldridFrameBuffer buffer)
                     throw new NotSupportedException("Offline GPU export requires a Veldrid framebuffer.");
+
                 return buffer.Framebuffer.ColorTargets[0].Target;
             }
         }
@@ -64,6 +67,7 @@ namespace osu.Framework.Graphics.Rendering
             renderer.PushScissorState(false);
             renderer.PushOrtho(new RectangleF(0, 0, bounds.Width, bounds.Height));
             renderer.PushDepthInfo(new DepthInfo(false, false));
+
             try
             {
                 renderer.Clear(new ClearInfo(osuTK.Graphics.Color4.Black));
@@ -86,6 +90,7 @@ namespace osu.Framework.Graphics.Rendering
             requireDrawThread();
             if (disposed)
                 return;
+
             disposed = true;
             target.Dispose();
         }

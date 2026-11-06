@@ -14,12 +14,12 @@ namespace osu.Framework.Platform.SDL3
 
         protected override unsafe void UpdateWindowStateAndSize(WindowState state, Display display, DisplayMode displayMode)
         {
-            // this reset is required even on changing from one fullscreen resolution to another.
-            // if it is not included, the GL context will not get the correct size.
-            // this is mentioned by multiple sources as an SDL issue, which seems to resolve by similar means (see https://discourse.libsdl.org/t/sdl-setwindowsize-does-not-work-in-fullscreen/20711/4).
-            SDL_SetWindowBordered(SDLWindowHandle, true).LogErrorIfFailed();
-            SDL_SetWindowFullscreen(SDLWindowHandle, false).LogErrorIfFailed();
-            SDL_RestoreWindow(SDLWindowHandle).LogErrorIfFailed();
+            if (state is WindowState.Normal or WindowState.Maximised)
+            {
+                SDL_SetWindowFullscreen(SDLWindowHandle, false).LogErrorIfFailed();
+                SDL_SetWindowBordered(SDLWindowHandle, true).LogErrorIfFailed();
+                SDL_RestoreWindow(SDLWindowHandle).LogErrorIfFailed();
+            }
 
             base.UpdateWindowStateAndSize(state, display, displayMode);
         }

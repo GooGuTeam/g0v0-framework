@@ -3,6 +3,8 @@
 #ifndef INTERNAL_GLOBAL_UNIFORMS_H
 #define INTERNAL_GLOBAL_UNIFORMS_H
 
+#extension GL_ARB_shader_storage_buffer_object : enable
+
 layout(std140, set = -1, binding = 0) uniform g_GlobalUniforms
 {
     // Whether the backbuffer is currently being drawn to.
@@ -39,6 +41,54 @@ layout(std140, set = -1, binding = 0) uniform g_GlobalUniforms
     // 3 -> Repeat
     int g_WrapModeS;
     int g_WrapModeT;
+
+    // The masking buffer entry for vertices that do not carry their own (see sh_Masking.h).
+    int g_MaskingIndex;
+
+    // Bit i is set when the texture in slot i has a single (coverage) channel. See sh_Texture.fs.
+    int g_SingleChannelSlots;
+
+    // Bit i is set when the texture in slot i uses nearest filtering. Only bindless texture tables read it.
+    int g_NearestSlots;
 };
+
+// Masking parameters for per-vertex masking (MaskingData.cs). Declared in every shader so that resource set numbering
+// is the same in all stages, whether or not a stage uses it.
+struct g0v0_MaskingData
+{
+    highp mat3 ToMaskingSpace;
+    highp vec4 MaskingRect;
+
+    // The scissor rectangle in the same space as vertex positions.
+    highp vec4 ScissorRect;
+
+    lowp mat4 BorderColour;
+    highp float CornerRadius;
+    highp float CornerExponent;
+    highp float BorderThickness;
+    mediump float MaskingBlendRange;
+    lowp float AlphaExponent;
+    highp float InnerCornerRadius;
+    highp vec2 EdgeOffset;
+    bool IsMasking;
+    bool DiscardInner;
+};
+
+#ifndef OSU_GRAPHICS_NO_SSBO
+
+layout(std140, set = -2, binding = 0) readonly buffer g_MaskingBuffer
+{
+    g0v0_MaskingData Data[];
+} g0v0_Masking;
+
+#else // OSU_GRAPHICS_NO_SSBO
+
+// 80 entries keep the block under the 16KiB guaranteed for uniform blocks.
+layout(std140, set = -2, binding = 0) uniform g_MaskingBuffer
+{
+    g0v0_MaskingData Data[80];
+} g0v0_Masking;
+
+#endif // OSU_GRAPHICS_NO_SSBO
 
 #endif

@@ -43,6 +43,25 @@ namespace osu.Framework.Configuration
             SetDefault(FrameworkSetting.FrameSync, FrameSync.Limit2x);
             SetDefault(FrameworkSetting.WindowMode, WindowMode.Windowed);
             SetDefault(FrameworkSetting.Renderer, RendererType.Automatic);
+            SetDefault(FrameworkSetting.FontAtlasPacking, Graphics.Textures.AtlasPackingStrategy.Etagere);
+            SetDefault(FrameworkSetting.TextureAtlasPacking, Graphics.Textures.AtlasPackingStrategy.Guillotiere);
+            SetDefault(FrameworkSetting.LowResolutionFonts, false);
+            // Single-channel glyph atlases use a quarter of the memory and upload bandwidth of RGBA ones.
+            SetDefault(FrameworkSetting.SingleChannelFontAtlas, true);
+            SetDefault(FrameworkSetting.SingleChannelFontAtlasDefaulted, false);
+            SetDefault(FrameworkSetting.ShowOverdrawIndicator, false);
+            SetDefault(FrameworkSetting.PerVertexMasking, true);
+            SetDefault(FrameworkSetting.TextureSlots, true);
+            SetDefault(FrameworkSetting.DirectPathRendering, false);
+            SetDefault(FrameworkSetting.SharedTextureAtlases, false);
+            SetDefault(FrameworkSetting.VulkanBindlessTextures, false);
+            SetDefault(FrameworkSetting.VulkanDescriptorIndexing, false);
+            SetDefault(FrameworkSetting.VulkanValidation, false);
+            SetDefault(FrameworkSetting.VulkanCaptureInterop, false);
+            SetDefault(FrameworkSetting.UseMediaFoundationVideoDecoder, true);
+            SetDefault(FrameworkSetting.OfflineVulkanRenderer, false);
+            SetDefault(FrameworkSetting.ProbeBindlessTextures, true);
+            SetDefault(FrameworkSetting.ClearGraphicsProbeCache, false);
             SetDefault(FrameworkSetting.PresentationPreference, PresentationPreference.Automatic);
             SetDefault(FrameworkSetting.VulkanPresentationPreference, VulkanPresentationPreference.Automatic);
             SetDefault(FrameworkSetting.RequestVulkanExclusiveFullscreen, true);
@@ -51,7 +70,14 @@ namespace osu.Framework.Configuration
             SetDefault(FrameworkSetting.WasapiAutoSharedOnBackground, true);
             SetDefault(FrameworkSetting.WasapiBufferSize, 0.0);
             SetDefault(FrameworkSetting.WasapiPeriod, 0.0);
+            SetDefault(FrameworkSetting.WasapiBufferMilliseconds, 0.0, 0, 500, 0.1);
+            SetDefault(FrameworkSetting.WasapiPeriodMilliseconds, 0.0, 0, 500, 0.1);
+            SetDefault(FrameworkSetting.WasapiUseSamples, false);
+            SetDefault(FrameworkSetting.WasapiBufferSamples, 0, 0, 192000);
+            SetDefault(FrameworkSetting.WasapiPeriodSamples, 0, 0, 192000);
+            SetDefault(FrameworkSetting.WasapiTimingMigrated, false);
             SetDefault(FrameworkSetting.Locale, string.Empty);
+            SetDefault(FrameworkSetting.RenderScale, 1.0f, 0.25f, 1.0f, 0.05f);
 
             SetDefault(FrameworkSetting.LoadErrorPlaceholders, !DebugUtils.IsNUnitRunning);
 
@@ -65,6 +91,20 @@ namespace osu.Framework.Configuration
         public FrameworkConfigManager(Storage storage, IDictionary<FrameworkSetting, object> defaultOverrides = null)
             : base(storage, defaultOverrides)
         {
+            // Subclasses may define only some settings, so migrations check that theirs exist.
+            if (ConfigStore.ContainsKey(FrameworkSetting.WasapiTimingMigrated) && !Get<bool>(FrameworkSetting.WasapiTimingMigrated))
+            {
+                SetValue(FrameworkSetting.WasapiBufferMilliseconds, Get<double>(FrameworkSetting.WasapiBufferSize) * 1000);
+                SetValue(FrameworkSetting.WasapiPeriodMilliseconds, Get<double>(FrameworkSetting.WasapiPeriod) * 1000);
+                SetValue(FrameworkSetting.WasapiTimingMigrated, true);
+            }
+
+            // The setting used to default to off and is saved with every configuration, so existing installs are switched over once.
+            if (ConfigStore.ContainsKey(FrameworkSetting.SingleChannelFontAtlasDefaulted) && !Get<bool>(FrameworkSetting.SingleChannelFontAtlasDefaulted))
+            {
+                SetValue(FrameworkSetting.SingleChannelFontAtlas, true);
+                SetValue(FrameworkSetting.SingleChannelFontAtlasDefaulted, true);
+            }
         }
 
         public override TrackedSettings CreateTrackedSettings() => new TrackedSettings
@@ -95,6 +135,13 @@ namespace osu.Framework.Configuration
         WasapiAutoSharedOnBackground,
         WasapiBufferSize,
         WasapiPeriod,
+        WasapiBufferMilliseconds,
+        WasapiPeriodMilliseconds,
+        WasapiUseSamples,
+        WasapiBufferSamples,
+        WasapiPeriodSamples,
+        WasapiTimingMigrated,
+        SingleChannelFontAtlasDefaulted,
         VolumeUniversal,
         VolumeEffect,
         VolumeMusic,
@@ -124,6 +171,7 @@ namespace osu.Framework.Configuration
 
         ShowUnicode,
         Locale,
+        RenderScale,
 
         /// <summary>
         /// Whether a <see cref="osu.Framework.Graphics.Drawable"/> which throws while loading should be replaced with a placeholder
@@ -139,5 +187,23 @@ namespace osu.Framework.Configuration
 
         [Obsolete("Input-related settings are now stored in InputConfigManager. Adjustments should be made via Host.AvailableInputHandlers bindables directly.")] // can be removed 20210911
         MapAbsoluteInputToWindow,
+
+        FontAtlasPacking,
+        TextureAtlasPacking,
+        ProbeBindlessTextures,
+        ClearGraphicsProbeCache,
+        LowResolutionFonts,
+        SingleChannelFontAtlas,
+        ShowOverdrawIndicator,
+        PerVertexMasking,
+        TextureSlots,
+        DirectPathRendering,
+        SharedTextureAtlases,
+        VulkanBindlessTextures,
+        VulkanDescriptorIndexing,
+        VulkanValidation,
+        VulkanCaptureInterop,
+        UseMediaFoundationVideoDecoder,
+        OfflineVulkanRenderer,
     }
 }

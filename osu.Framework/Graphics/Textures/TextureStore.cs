@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
@@ -43,6 +43,14 @@ namespace osu.Framework.Graphics.Textures
         private const int max_atlas_size = 1024;
 
         /// <summary>
+        /// Whether stores with the same settings share one atlas per renderer (see <see cref="Renderer.GetSharedTextureAtlas"/>).
+        /// Off by default: in gameplay captures the combined textures still spanned three 1024x1024 pages, and sharing only changed
+        /// how textures were split between them (one to three more draws per frame). Enable the SharedTextureAtlases framework setting to use this.
+        /// Affects stores created afterwards.
+        /// </summary>
+        internal static bool ShareAtlases { get; set; }
+
+        /// <summary>
         /// Decides at what resolution multiple this <see cref="TextureStore"/> is providing sprites at.
         /// ie. if we are providing high resolution (at 2x the resolution of standard 1366x768) sprites this should be 2.
         /// </summary>
@@ -62,7 +70,9 @@ namespace osu.Framework.Graphics.Textures
             if (useAtlas)
             {
                 int size = Math.Min(max_atlas_size, renderer.MaxTextureSize);
-                Atlas = new TextureAtlas(renderer, size, size, filteringMode: filteringMode, manualMipmaps: manualMipmaps);
+                Atlas = ShareAtlases && renderer is Renderer concrete
+                    ? concrete.GetSharedTextureAtlas(size, filteringMode, manualMipmaps)
+                    : new TextureAtlas(renderer, size, size, filteringMode: filteringMode, manualMipmaps: manualMipmaps);
             }
         }
 
@@ -115,7 +125,7 @@ namespace osu.Framework.Graphics.Textures
                 if ((tex = Atlas.Add(upload.Width, upload.Height, wrapModeS, wrapModeT)) == null)
                 {
                     Logger.Log(
-                        $"Texture requested ({upload.Width}x{upload.Height}) which exceeds {nameof(TextureStore)}'s atlas size ({max_atlas_size}x{max_atlas_size}) - bypassing atlasing. Consider using {nameof(LargeTextureStore)}.",
+                        $"Texture requested ({upload.Width}x{upload.Height}) which exceeds this {nameof(TextureStore)}'s atlas capacity - bypassing atlasing. Consider using {nameof(LargeTextureStore)}.",
                         LoggingTarget.Performance);
                 }
             }

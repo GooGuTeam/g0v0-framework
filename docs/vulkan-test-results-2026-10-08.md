@@ -3,7 +3,7 @@
 ## Environment
 
 Windows, NVIDIA GeForce RTX 5060 Laptop GPU, NVIDIA driver 591.91.
-Built Framework.Tests with `-p:UseLocalVeldrid=true`, using sibling Veldrid based on a405fe8484 plus the local opt-in FSE prototype. These tests used `VELDRID_VK_FSE=0` and `OSU_GRAPHICS_SURFACE=Vulkan`; ordinary and deferred renderers were selected separately with `OSU_GRAPHICS_RENDERER`.
+Built Framework.Tests with `-p:G0V0SourceVeldrid=true`, using sibling Veldrid based on a405fe8484 plus the local opt-in FSE prototype. These tests used `VELDRID_VK_FSE=0` and `OSU_GRAPHICS_SURFACE=Vulkan`; ordinary and deferred renderers were selected separately with `OSU_GRAPHICS_RENDERER`.
 
 An existing g0v0 process remained running. These are functional smoke tests, not controlled performance measurements.
 

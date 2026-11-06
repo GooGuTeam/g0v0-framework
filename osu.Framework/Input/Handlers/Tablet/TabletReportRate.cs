@@ -3,6 +3,7 @@
 
 using System;
 using System.Diagnostics;
+using System.Threading;
 
 namespace osu.Framework.Input.Handlers.Tablet
 {
@@ -11,7 +12,7 @@ namespace osu.Framework.Input.Handlers.Tablet
     /// </summary>
     internal sealed class TabletReportRate
     {
-        private readonly object sync = new object();
+        private readonly Lock sync = new Lock();
         private readonly long[] epochs = new long[100];
         private readonly int[] counts = new int[100];
         private static long currentBucket => (long)(Stopwatch.GetTimestamp() * 100.0 / Stopwatch.Frequency);
@@ -22,11 +23,13 @@ namespace osu.Framework.Input.Handlers.Tablet
             {
                 long now = currentBucket;
                 int index = (int)(now % counts.Length);
+
                 if (epochs[index] != now)
                 {
                     epochs[index] = now;
                     counts[index] = 0;
                 }
+
                 counts[index]++;
             }
         }
@@ -37,11 +40,13 @@ namespace osu.Framework.Input.Handlers.Tablet
             {
                 long now = currentBucket;
                 int count = 0;
+
                 for (int i = 0; i < counts.Length; i++)
                 {
                     if (now - epochs[i] >= 0 && now - epochs[i] < counts.Length)
                         count += counts[i];
                 }
+
                 return count;
             }
         }

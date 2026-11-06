@@ -1,0 +1,17 @@
+﻿<Project>
+  <!-- Windows x64 decodes video with Media Foundation (MediaFoundationVideoDecoder), so FFmpeg's native libraries are not shipped there.
+       FLV videos and codecs without a Windows extension then do not play. Set G0V0KeepWindowsFfmpeg to true to keep FFmpeg as a fallback. -->
+  <PropertyGroup>
+    <_G0V0WindowsFfmpegPattern>^(avcodec-58|avformat-58|avutil-56|swscale-5)$</_G0V0WindowsFfmpegPattern>
+  </PropertyGroup>
+  <Target Name="G0V0ExcludeWindowsFfmpeg" AfterTargets="ResolvePackageAssets" Condition="'$(G0V0KeepWindowsFfmpeg)' != 'true'">
+    <ItemGroup>
+      <!-- RID-specific builds and publishes (win-x64) copy native assets flat. -->
+      <NativeCopyLocalItems Remove="@(NativeCopyLocalItems)"
+                            Condition="'$(RuntimeIdentifier)' == 'win-x64' and $([System.Text.RegularExpressions.Regex]::IsMatch('%(Filename)', '$(_G0V0WindowsFfmpegPattern)'))" />
+      <!-- RID-less builds copy every runtime's assets under runtimes/. -->
+      <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)"
+                                    Condition="'%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'win-x64' and $([System.Text.RegularExpressions.Regex]::IsMatch('%(Filename)', '$(_G0V0WindowsFfmpegPattern)'))" />
+    </ItemGroup>
+  </Target>
+</Project>

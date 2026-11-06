@@ -18,6 +18,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Builds compile the image codec library from these submodules.
+          submodules: recursive
 
       - name: Install .NET 10.0.x
         uses: actions/setup-dotnet@v5
@@ -56,12 +59,12 @@ jobs:
           exit $exit_code
 
       - name: InspectCode
-        uses: JetBrains/ReSharper-InspectCode@v0.11
+        uses: JetBrains/ReSharper-InspectCode@v0.14
         with:
           # this is WTF tier but if you don't specify *both* of these the defaults assume `build: true`
           build: false
           no-build: true
-          tool-version: '2026.2.1'
+          tool-version: '2026.2.4.1'
           solution: ./osu-framework.Desktop.slnf
           caches-home: inspectcode
           verbosity: WARN
@@ -86,6 +89,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Builds compile the image codec library from these submodules.
+          submodules: recursive
 
       - name: Install .NET 10.0.x
         uses: actions/setup-dotnet@v5
@@ -96,6 +102,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: 1.26.1
+          cache: false
 
       - name: Install httpbin
         run: go install github.com/mccutchen/go-httpbin/v2/cmd/go-httpbin@latest
@@ -127,6 +134,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Builds compile the image codec library from these submodules.
+          submodules: recursive
 
       - name: Setup JDK 11
         uses: actions/setup-java@v5
@@ -152,14 +162,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Builds compile the image codec library from these submodules.
+          submodules: recursive
 
       - name: Install .NET 10.0.x
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.0.x"
 
+      # The .NET workload (built against/requires a specific Xcode version) and the default Xcode on the GHA runner can get out of sync.
+      # Force a common Xcode version to prevent builds spontaneously failing.
       - name: Restore .NET workloads
-        run: dotnet workload install ios
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
+          dotnet workload install ios --version 10.0.402
 
       - name: Compile
         run: dotnet build -c Debug osu-framework.iOS.slnf

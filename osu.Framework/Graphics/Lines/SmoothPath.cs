@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using osu.Framework.Allocation;
@@ -7,8 +7,7 @@ using osu.Framework.Caching;
 using osu.Framework.Graphics.Rendering;
 using osu.Framework.Graphics.Textures;
 using osuTK.Graphics;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using osu.Framework.Imaging;
 
 namespace osu.Framework.Graphics.Lines
 {
@@ -39,6 +38,10 @@ namespace osu.Framework.Graphics.Lines
 
         private readonly Cached textureCache = new Cached();
 
+        private Color4[]? directGradient;
+
+        private protected override Color4[]? DirectGradient => directGradient;
+
         protected void InvalidateTexture()
         {
             textureCache.Invalidate();
@@ -54,6 +57,7 @@ namespace osu.Framework.Graphics.Lines
 
             //initialise background
             var raw = new Image<Rgba32>(textureWidth, 1);
+            var gradient = DirectDrawingEnabled ? new Color4[textureWidth] : null;
 
             const float aa_portion = 0.02f;
 
@@ -63,7 +67,15 @@ namespace osu.Framework.Graphics.Lines
 
                 var colour = ColourAt(progress);
                 raw[i, 0] = new Rgba32(colour.R, colour.G, colour.B, colour.A * Math.Min(progress / aa_portion, 1));
+
+                if (gradient != null)
+                {
+                    var pixel = raw[i, 0];
+                    gradient[i] = new Color4(pixel.R / 255f, pixel.G / 255f, pixel.B / 255f, pixel.A / 255f);
+                }
             }
+
+            directGradient = gradient;
 
             if (Texture?.Width == textureWidth)
             {

@@ -30,11 +30,13 @@ namespace osu.Framework.Audio.Mixing
             previousAudioThread = ThreadSafety.IsAudioThread;
             ThreadSafety.IsAudioThread = true;
             previousDevice = ManagedBass.Bass.CurrentDevice;
+
             try
             {
                 ensureBassDevice();
                 mixer = new BassAudioMixer(null, null, @"Offline export", offline: true);
                 mixer.Update();
+
                 if (mixer.Handle == 0)
                 {
                     mixer.Dispose();
@@ -55,6 +57,7 @@ namespace osu.Framework.Audio.Mixing
         {
             if (!ManagedBass.Bass.Init(ManagedBass.Bass.NoSoundDevice) && ManagedBass.Bass.LastError != Errors.Already)
                 throw new InvalidOperationException($@"Unable to initialise the private audio device: {ManagedBass.Bass.LastError}");
+
             ManagedBass.Bass.CurrentDevice = ManagedBass.Bass.NoSoundDevice;
         }
 
@@ -62,7 +65,7 @@ namespace osu.Framework.Audio.Mixing
         /// Creates private track and sample stores preserving normal channel adjustments,
         /// looping and stop behaviour. Dispose the manager before disposing this mixer.
         /// </summary>
-        public AudioManager CreateAudioManager(osu.Framework.IO.Stores.ResourceStore<byte[]> resources)
+        public AudioManager CreateAudioManager(IO.Stores.ResourceStore<byte[]> resources)
         {
             requireAudioThread();
             ObjectDisposedException.ThrowIf(disposed, this);
@@ -80,8 +83,10 @@ namespace osu.Framework.Audio.Mixing
             ArgumentOutOfRangeException.ThrowIfNegative(frames);
             if (output.Length < checked(frames * 2))
                 throw new ArgumentException("PCM buffer is too small.", nameof(output));
+
             if (frames == 0)
                 return;
+
             mixer.Update();
             int bytes = checked(frames * 2 * sizeof(float));
             int read = ManagedBass.Bass.ChannelGetData(mixer.Handle, output, bytes | (int)DataFlags.Float);
@@ -100,7 +105,7 @@ namespace osu.Framework.Audio.Mixing
             ObjectDisposedException.ThrowIf(disposed, this);
             if (channelHandle == 0) return false;
 
-            return ManagedBass.Mix.BassMix.MixerAddChannel(mixer.Handle, channelHandle, ManagedBass.BassFlags.MixerChanNoRampin);
+            return ManagedBass.Mix.BassMix.MixerAddChannel(mixer.Handle, channelHandle, BassFlags.MixerChanNoRampin);
         }
 
         /// <summary>
@@ -112,10 +117,10 @@ namespace osu.Framework.Audio.Mixing
             ObjectDisposedException.ThrowIf(disposed, this);
             if (sampleId == 0) return false;
 
-            int channel = ManagedBass.Bass.SampleGetChannel(sampleId, ManagedBass.BassFlags.SampleChannelStream | ManagedBass.BassFlags.Decode);
+            int channel = ManagedBass.Bass.SampleGetChannel(sampleId, BassFlags.SampleChannelStream | BassFlags.Decode);
             if (channel == 0) return false;
 
-            return ManagedBass.Mix.BassMix.MixerAddChannel(mixer.Handle, channel, ManagedBass.BassFlags.MixerChanNoRampin);
+            return ManagedBass.Mix.BassMix.MixerAddChannel(mixer.Handle, channel, BassFlags.MixerChanNoRampin);
         }
 
         /// <summary>
@@ -125,13 +130,14 @@ namespace osu.Framework.Audio.Mixing
         {
             requireAudioThread();
             ObjectDisposedException.ThrowIf(disposed, this);
-            if (data == null || data.Length == 0) return false;
+            if (data.Length == 0) return false;
 
             if (!loadedSamples.TryGetValue(data, out int sampleId))
             {
-                using var handle = new osu.Framework.Allocation.ObjectHandle<byte[]>(data, System.Runtime.InteropServices.GCHandleType.Pinned);
-                sampleId = ManagedBass.Bass.SampleLoad(handle.Address, 0, data.Length, 8, ManagedBass.BassFlags.Default);
+                using var handle = new Allocation.ObjectHandle<byte[]>(data, System.Runtime.InteropServices.GCHandleType.Pinned);
+                sampleId = ManagedBass.Bass.SampleLoad(handle.Address, 0, data.Length, 8, BassFlags.Default);
                 if (sampleId == 0) return false;
+
                 loadedSamples[data] = sampleId;
             }
 
@@ -143,10 +149,12 @@ namespace osu.Framework.Audio.Mixing
             requireAudioThread();
             if (disposed)
                 return;
+
             disposed = true;
             foreach (int sampleId in loadedSamples.Values)
                 ManagedBass.Bass.SampleFree(sampleId);
             loadedSamples.Clear();
+
             try
             {
                 mixer.Dispose();

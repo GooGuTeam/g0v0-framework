@@ -2,7 +2,7 @@
 
 ## Scope
 
-Opt-in local Veldrid change: set `VELDRID_LOW_LATENCY=1` before device creation. Unset it (or set 0) for the baseline. Requires `-p:UseLocalVeldrid=true`; packaged Veldrid does not contain this change. Existing user modifications, including Vulkan FSE/synchronization changes, are retained.
+Opt-in local Veldrid change: set `VELDRID_LOW_LATENCY=1` before device creation. Unset it (or set 0) for the baseline. Requires `-p:G0V0SourceVeldrid=true`; packaged Veldrid does not contain this change. Existing user modifications, including Vulkan FSE/synchronization changes, are retained.
 
 This is a queue-depth/pacing experiment, not a measured input-latency improvement. No native thread migration or legacy DXGI presentation is introduced.
 
@@ -21,7 +21,7 @@ Image count is NOT a GPU frames-in-flight cap. Vulkan still acquires/waits for t
 ## Build and compare (PowerShell, from workspace root)
 
 ```powershell
-dotnet build g0v0/osu.Desktop/osu.Desktop.csproj -p:UseLocalVeldrid=true
+dotnet build g0v0/osu.Desktop/osu.Desktop.csproj -p:G0V0SourceVeldrid=true
 $env:VELDRID_LOW_LATENCY = '1'
 $env:VELDRID_VK_FSE = '0' # isolate the pacing experiment from FSE
 $env:OSU_GRAPHICS_SURFACE = 'Vulkan' # repeat with 'Direct3D11'
@@ -35,4 +35,4 @@ Compare both ordinary and deferred renderers, VSync on/off, windowed/borderless 
 
 ## Validation performed
 
-`dotnet build g0v0-framework/osu.Framework.Tests/osu.Framework.Tests.csproj -p:UseLocalVeldrid=true --no-restore` succeeded with 0 errors. Log: `migration-audit/low-latency-build.log`. Existing ImageSharp advisory warnings and a Vortice platform warning remain. No visual runtime, driver validation, or input-latency measurement has been performed in this pass. The game executable is not yet rebuilt by this validation command.
+`dotnet build g0v0-framework/osu.Framework.Tests/osu.Framework.Tests.csproj -p:G0V0SourceVeldrid=true --no-restore` succeeded with 0 errors. Log: `migration-audit/low-latency-build.log`. Existing ImageSharp advisory warnings and a Vortice platform warning remain. No visual runtime, driver validation, or input-latency measurement has been performed in this pass. The game executable is not yet rebuilt by this validation command.

@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
@@ -55,8 +55,12 @@ namespace osu.Framework.Graphics.Containers
                 effectPlacement = Source.EffectPlacement;
 
                 drawOriginal = Source.DrawOriginal;
-                blurSigma = Source.BlurSigma;
-                blurRadius = new Vector2I(Blur.KernelSize(blurSigma.X), Blur.KernelSize(blurSigma.Y));
+                // Kernel size evaluation loops over the gaussian, so only redo it when sigma actually changes.
+                if (Source.BlurSigma != blurSigma)
+                {
+                    blurSigma = Source.BlurSigma;
+                    blurRadius = new Vector2I(Blur.KernelSize(blurSigma.X), Blur.KernelSize(blurSigma.Y));
+                }
                 blurRotation = Source.BlurRotation;
                 grayscaleStrength = Source.GrayscaleStrength;
 
@@ -164,6 +168,7 @@ namespace osu.Framework.Graphics.Containers
             {
                 base.Dispose(isDisposing);
                 blurParametersBuffer?.Dispose();
+                grayscaleParametersBuffer?.Dispose();
             }
 
             [StructLayout(LayoutKind.Sequential, Pack = 1)]

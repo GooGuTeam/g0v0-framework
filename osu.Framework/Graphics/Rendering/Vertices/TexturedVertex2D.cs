@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Runtime.InteropServices;
@@ -30,6 +30,13 @@ namespace osu.Framework.Graphics.Rendering.Vertices
         [VertexMember(1, VertexAttribPointerType.Float)]
         private readonly float backbufferDrawDepth;
 
+        /// <summary>
+        /// One more than the masking buffer entry this vertex is drawn with, or 0 to use the renderer's current entry.
+        /// Vertex batches set this when the vertex is added; see <c>sh_Masking.h</c>.
+        /// </summary>
+        [VertexMember(1, VertexAttribPointerType.Float)]
+        internal float MaskingIndex;
+
         [Obsolete("Initialise this type with an IRenderer instead", true)]
         public TexturedVertex2D()
         {
@@ -48,6 +55,7 @@ namespace osu.Framework.Graphics.Rendering.Vertices
             && Colour.Equals(other.Colour)
             && TextureRect.Equals(other.TextureRect)
             && BlendRange.Equals(other.BlendRange)
-            && backbufferDrawDepth == other.backbufferDrawDepth;
+            && backbufferDrawDepth == other.backbufferDrawDepth
+            && MaskingIndex == other.MaskingIndex;
     }
 }

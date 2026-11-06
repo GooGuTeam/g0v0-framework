@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Runtime.CompilerServices;
@@ -32,28 +32,8 @@ namespace osu.Framework.Graphics.Rendering
         {
             ObjectDisposedException.ThrowIf(!texture.Available, texture);
 
-            if (!renderer.BindTexture(texture))
+            if (!bindOrResolveUntextured(renderer, texture, textureRect, inflationPercentage, textureCoords, false, out RectangleF texRect, out RectangleF inflatedCoordRect, out Vector2 inflationAmount))
                 return;
-
-            RectangleF texRect = texture.GetTextureRect(textureRect);
-            Vector2 inflationAmount = inflationPercentage.HasValue ? new Vector2(inflationPercentage.Value.X * texRect.Width, inflationPercentage.Value.Y * texRect.Height) : Vector2.Zero;
-
-            // If clamp to edge is active, allow the texture coordinates to penetrate by half the repeated atlas margin width
-            if (renderer.CurrentWrapModeS == WrapMode.ClampToEdge || renderer.CurrentWrapModeT == WrapMode.ClampToEdge)
-            {
-                Vector2 inflationVector = Vector2.Zero;
-
-                const int mipmap_padding_requirement = (1 << IRenderer.MAX_MIPMAP_LEVELS) / 2;
-
-                if (renderer.CurrentWrapModeS == WrapMode.ClampToEdge)
-                    inflationVector.X = mipmap_padding_requirement / (float)texture.Width;
-                if (renderer.CurrentWrapModeT == WrapMode.ClampToEdge)
-                    inflationVector.Y = mipmap_padding_requirement / (float)texture.Height;
-                texRect = texRect.Inflate(inflationVector);
-            }
-
-            RectangleF coordRect = texture.GetTextureRect(textureCoords ?? textureRect);
-            RectangleF inflatedCoordRect = coordRect.Inflate(inflationAmount);
 
             vertexAction ??= renderer.DefaultQuadBatch.AddAction;
 
@@ -122,13 +102,118 @@ namespace osu.Framework.Graphics.Rendering
         {
             ObjectDisposedException.ThrowIf(!texture.Available, texture);
 
-            if (!renderer.BindTexture(texture))
+            if (!bindOrResolveUntextured(renderer, texture, textureRect, inflationPercentage, textureCoords, blendRangeOverride.HasValue, out RectangleF texRect, out RectangleF inflatedCoordRect,
+                    out Vector2 inflationAmount))
                 return;
 
-            RectangleF texRect = texture.GetTextureRect(textureRect);
-            Vector2 inflationAmount = inflationPercentage.HasValue ? new Vector2(inflationPercentage.Value.X * texRect.Width, inflationPercentage.Value.Y * texRect.Height) : Vector2.Zero;
+            Vector2 blendRange = blendRangeOverride ?? inflationAmount;
 
-            // If clamp to edge is active, allow the texture coordinates to penetrate by half the repeated atlas margin width
+            // Explicit callbacks retain their individual calls, including any state changes between vertices.
+            if (vertexAction != null || !tryAddQuad(renderer, vertexQuad, drawColour, texRect, inflatedCoordRect, blendRange))
+            {
+                vertexAction ??= renderer.DefaultQuadBatch.AddAction;
+
+                vertexAction(new TexturedVertex2D(renderer)
+                {
+                    Position = vertexQuad.BottomLeft,
+                    TexturePosition = new Vector2(inflatedCoordRect.Left, inflatedCoordRect.Bottom),
+                    TextureRect = new Vector4(texRect.Left, texRect.Top, texRect.Right, texRect.Bottom),
+                    BlendRange = blendRange,
+                    Colour = drawColour.BottomLeft.SRGB,
+                });
+                vertexAction(new TexturedVertex2D(renderer)
+                {
+                    Position = vertexQuad.BottomRight,
+                    TexturePosition = new Vector2(inflatedCoordRect.Right, inflatedCoordRect.Bottom),
+                    TextureRect = new Vector4(texRect.Left, texRect.Top, texRect.Right, texRect.Bottom),
+                    BlendRange = blendRange,
+                    Colour = drawColour.BottomRight.SRGB,
+                });
+                vertexAction(new TexturedVertex2D(renderer)
+                {
+                    Position = vertexQuad.TopRight,
+                    TexturePosition = new Vector2(inflatedCoordRect.Right, inflatedCoordRect.Top),
+                    TextureRect = new Vector4(texRect.Left, texRect.Top, texRect.Right, texRect.Bottom),
+                    BlendRange = blendRange,
+                    Colour = drawColour.TopRight.SRGB,
+                });
+                vertexAction(new TexturedVertex2D(renderer)
+                {
+                    Position = vertexQuad.TopLeft,
+                    TexturePosition = new Vector2(inflatedCoordRect.Left, inflatedCoordRect.Top),
+                    TextureRect = new Vector4(texRect.Left, texRect.Top, texRect.Right, texRect.Bottom),
+                    BlendRange = blendRange,
+                    Colour = drawColour.TopLeft.SRGB,
+                });
+            }
+
+            long area = (long)vertexQuad.Area;
+
+            // Area may incorrect return a negative value, so guard against that case for now.
+            // See https://sentry.ppy.sh/organizations/ppy/issues/5739.
+            if (area > 0)
+                FrameStatistics.Add(StatisticsCounterType.Pixels, area);
+        }
+
+        /// <summary>
+        /// Binds <paramref name="texture"/> and resolves its coordinates, or resolves coordinates for an untextured draw
+        /// when <see cref="Renderer.CanDrawUntextured"/> allows the texture to remain unbound.
+        /// </summary>
+        /// <returns>Whether the texture can be drawn.</returns>
+        private static bool bindOrResolveUntextured(IRenderer renderer, Texture texture, RectangleF? textureRect, Vector2? inflationPercentage, RectangleF? textureCoords, bool hasBlendRangeOverride,
+                                                    out RectangleF texRect, out RectangleF inflatedCoordRect, out Vector2 inflationAmount)
+        {
+            // An explicit blend range is not expressed in texture space, so only accept it where the drawing-rect blend
+            // cannot apply (coordinates equal to the texture rectangle). Otherwise its scale relative to the coordinates would change.
+            bool blendCompatible = !hasBlendRangeOverride || (textureCoords == null && (inflationPercentage ?? Vector2.Zero) == Vector2.Zero);
+
+            if (blendCompatible && renderer is Renderer concrete && concrete.CanDrawUntextured(texture))
+            {
+                RectangleF whiteRect = texture.GetTextureRect(textureRect);
+
+                if (whiteRect.Width > 0 && whiteRect.Height > 0)
+                {
+                    // Map the white pixel's texture space affinely onto the marker rectangle, preserving every relation the
+                    // shader uses between coordinates, rectangle and blend range.
+                    RectangleF untextured = Renderer.UNTEXTURED_RECT;
+                    Vector2 scale = new Vector2(untextured.Width / whiteRect.Width, untextured.Height / whiteRect.Height);
+                    RectangleF coordRect = textureCoords.HasValue ? texture.GetTextureRect(textureCoords) : whiteRect;
+
+                    coordRect = new RectangleF(
+                        untextured.X + (coordRect.X - whiteRect.X) * scale.X,
+                        untextured.Y + (coordRect.Y - whiteRect.Y) * scale.Y,
+                        coordRect.Width * scale.X,
+                        coordRect.Height * scale.Y);
+
+                    texRect = untextured;
+                    inflationAmount = inflationPercentage.HasValue ? new Vector2(inflationPercentage.Value.X * untextured.Width, inflationPercentage.Value.Y * untextured.Height) : Vector2.Zero;
+                    inflatedCoordRect = coordRect.Inflate(inflationAmount);
+                    return true;
+                }
+            }
+
+            if (!renderer.BindTexture(texture))
+            {
+                texRect = inflatedCoordRect = default;
+                inflationAmount = default;
+                return false;
+            }
+
+            GetQuadTextureCoordinates(renderer, texture, textureRect, inflationPercentage, textureCoords, out texRect, out inflatedCoordRect, out inflationAmount);
+            return true;
+        }
+
+        /// <summary>
+        /// Resolves quad sampling coordinates after binding the texture, including atlas wrapping and edge inflation.
+        /// </summary>
+        internal static void GetQuadTextureCoordinates(IRenderer renderer, Texture texture, RectangleF? textureRect, Vector2? inflationPercentage, RectangleF? textureCoords,
+                                                       out RectangleF texRect, out RectangleF inflatedCoordRect, out Vector2 inflationAmount)
+        {
+            texRect = texture.GetTextureRect(textureRect);
+            RectangleF coordRect = textureCoords.HasValue ? texture.GetTextureRect(textureCoords) : texRect;
+            inflationAmount = inflationPercentage.HasValue ? new Vector2(inflationPercentage.Value.X * texRect.Width, inflationPercentage.Value.Y * texRect.Height) : Vector2.Zero;
+
+            // Capture coordinates before expanding the clamp bounds, just as in ordinary quad drawing.
             if (renderer.CurrentWrapModeS == WrapMode.ClampToEdge || renderer.CurrentWrapModeT == WrapMode.ClampToEdge)
             {
                 Vector2 inflationVector = Vector2.Zero;
@@ -142,51 +227,60 @@ namespace osu.Framework.Graphics.Rendering
                 texRect = texRect.Inflate(inflationVector);
             }
 
-            RectangleF coordRect = texture.GetTextureRect(textureCoords ?? textureRect);
-            RectangleF inflatedCoordRect = coordRect.Inflate(inflationAmount);
-            Vector2 blendRange = blendRangeOverride ?? inflationAmount;
+            inflatedCoordRect = coordRect.Inflate(inflationAmount);
+        }
 
-            vertexAction ??= renderer.DefaultQuadBatch.AddAction;
+        private static bool tryAddQuad(IRenderer renderer, in Quad quad, in ColourInfo colour, in RectangleF textureRect, in RectangleF textureCoords, Vector2 blendRange)
+        {
+            if (renderer.DefaultQuadBatch is not IQuadBatch<TexturedVertex2D> batch)
+                return false;
 
-            vertexAction(new TexturedVertex2D(renderer)
+            Span<TexturedVertex2D> vertices = stackalloc TexturedVertex2D[IRenderer.VERTICES_PER_QUAD];
+            var vertex = new TexturedVertex2D(renderer)
             {
-                Position = vertexQuad.BottomLeft,
-                TexturePosition = new Vector2(inflatedCoordRect.Left, inflatedCoordRect.Bottom),
-                TextureRect = new Vector4(texRect.Left, texRect.Top, texRect.Right, texRect.Bottom),
+                TextureRect = new Vector4(textureRect.Left, textureRect.Top, textureRect.Right, textureRect.Bottom),
                 BlendRange = blendRange,
-                Colour = drawColour.BottomLeft.SRGB,
-            });
-            vertexAction(new TexturedVertex2D(renderer)
-            {
-                Position = vertexQuad.BottomRight,
-                TexturePosition = new Vector2(inflatedCoordRect.Right, inflatedCoordRect.Bottom),
-                TextureRect = new Vector4(texRect.Left, texRect.Top, texRect.Right, texRect.Bottom),
-                BlendRange = blendRange,
-                Colour = drawColour.BottomRight.SRGB,
-            });
-            vertexAction(new TexturedVertex2D(renderer)
-            {
-                Position = vertexQuad.TopRight,
-                TexturePosition = new Vector2(inflatedCoordRect.Right, inflatedCoordRect.Top),
-                TextureRect = new Vector4(texRect.Left, texRect.Top, texRect.Right, texRect.Bottom),
-                BlendRange = blendRange,
-                Colour = drawColour.TopRight.SRGB,
-            });
-            vertexAction(new TexturedVertex2D(renderer)
-            {
-                Position = vertexQuad.TopLeft,
-                TexturePosition = new Vector2(inflatedCoordRect.Left, inflatedCoordRect.Top),
-                TextureRect = new Vector4(texRect.Left, texRect.Top, texRect.Right, texRect.Bottom),
-                BlendRange = blendRange,
-                Colour = drawColour.TopLeft.SRGB,
-            });
+            };
 
-            long area = (long)vertexQuad.Area;
+            vertex.Position = quad.BottomLeft;
+            vertex.TexturePosition = new Vector2(textureCoords.Left, textureCoords.Bottom);
+            vertex.Colour = colour.BottomLeft.SRGB;
+            vertices[0] = vertex;
 
-            // Area may incorrect return a negative value, so guard against that case for now.
-            // See https://sentry.ppy.sh/organizations/ppy/issues/5739.
-            if (area > 0)
-                FrameStatistics.Add(StatisticsCounterType.Pixels, area);
+            vertex.Position = quad.BottomRight;
+            vertex.TexturePosition = new Vector2(textureCoords.Right, textureCoords.Bottom);
+            vertex.Colour = colour.BottomRight.SRGB;
+            vertices[1] = vertex;
+
+            vertex.Position = quad.TopRight;
+            vertex.TexturePosition = new Vector2(textureCoords.Right, textureCoords.Top);
+            vertex.Colour = colour.TopRight.SRGB;
+            vertices[2] = vertex;
+
+            vertex.Position = quad.TopLeft;
+            vertex.TexturePosition = new Vector2(textureCoords.Left, textureCoords.Top);
+            vertex.Colour = colour.TopLeft.SRGB;
+            vertices[3] = vertex;
+
+            return TryAddQuadRetainingMasking(renderer, batch, vertices, quad, blendRange);
+        }
+
+        /// <summary>
+        /// Submits a complete quad, keeping the applied clipping state when the quad renders identically under it.
+        /// </summary>
+        internal static bool TryAddQuadRetainingMasking(IRenderer renderer, IQuadBatch<TexturedVertex2D> batch, ReadOnlySpan<TexturedVertex2D> vertices, in Quad quad, Vector2 blendRange)
+        {
+            if (renderer is not Renderer concrete || !concrete.TryRetainAppliedMasking(batch, quad, blendRange))
+                return batch.TryAddQuad(vertices);
+
+            try
+            {
+                return batch.TryAddQuad(vertices);
+            }
+            finally
+            {
+                concrete.EndRetainAppliedMasking();
+            }
         }
 
         /// <summary>

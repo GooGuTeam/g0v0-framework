@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Diagnostics;
@@ -44,6 +44,15 @@ namespace osu.Framework.Graphics.Veldrid.Buffers
 
             // we use a buffer with memory storage shared between the CPU and the GPU, therefore we don't need to do explicit synchronisation/updates (which is queued when returning true here).
             return false;
+        }
+
+        public unsafe void SetVertices(int vertexIndex, ReadOnlySpan<T> vertices, ref int synchronisationBeginIndex, ref int synchronisationEndIndex)
+        {
+            if (sharedBuffer == null)
+                initialiseBuffer();
+
+            vertices.CopyTo(new Span<T>(sharedBufferMemory, Size).Slice(vertexIndex, vertices.Length));
+            // The mapped storage is already shared with the GPU; do not request an explicit upload.
         }
 
         private unsafe void initialiseBuffer()

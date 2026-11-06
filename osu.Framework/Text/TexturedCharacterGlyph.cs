@@ -15,8 +15,8 @@ namespace osu.Framework.Text
         public float XAdvance => glyph.XAdvance * Scale;
         public float Baseline => glyph.Baseline * Scale;
         public char Character => glyph.Character;
-        public float Width => Texture.Width * Scale / textureScale;
-        public float Height => Texture.Height * Scale / textureScale;
+        public float Width => (Texture?.Width ?? 0) * Scale / textureScale;
+        public float Height => (Texture?.Height ?? 0) * Scale / textureScale;
 
         /// <summary>
         /// An adjustment factor in scale. This is applied to all other returned metric properties.

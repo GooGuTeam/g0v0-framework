@@ -88,8 +88,10 @@ namespace osu.Framework.Graphics.Rendering
                     pendingDisposals.AddRange(newDisposals);
                     newDisposals.Clear();
                 }
+
                 if (pendingDisposals.Count == 0)
                     return;
+
                 var batch = pendingDisposals.ToArray();
                 pendingDisposals.Clear();
                 foreach (var disposal in batch)

@@ -32,7 +32,7 @@ namespace osu.Framework.Tests.Graphics
             var submit = info.GetType().GetMethod("SubmitExternalCapture");
             Assert.That(submit, Is.Not.Null);
             var error = Assert.Throws<System.Reflection.TargetInvocationException>(() =>
-                submit!.Invoke(disabled.GetVulkanInfo(), new object[] { IntPtr.Zero, IntPtr.Zero, 0UL }));
+                submit!.Invoke(disabled.GetVulkanInfo(), [IntPtr.Zero, IntPtr.Zero, 0UL]));
             Assert.That(error!.InnerException, Is.TypeOf<VeldridException>());
         }
 
@@ -43,6 +43,7 @@ namespace osu.Framework.Tests.Graphics
         {
             bool wasDrawThread = ThreadSafety.IsDrawThread;
             ThreadSafety.IsDrawThread = true;
+
             try
             {
                 using var device = backend == GraphicsBackend.Vulkan
@@ -65,6 +66,7 @@ namespace osu.Framework.Tests.Graphics
                 Assert.That(session.DroppedFrames, Is.EqualTo(1));
                 device.WaitForIdle();
                 Assert.That(session.TryAcquireFrame(out var frame), Is.True);
+
                 using (frame!)
                 {
                     using var readback = device.ResourceFactory.CreateTexture(TextureDescription.Texture2D(16, 16, 1, 1,
@@ -75,6 +77,7 @@ namespace osu.Framework.Tests.Graphics
                     device.SubmitCommands(commands);
                     device.WaitForIdle();
                     var pixels = device.Map<uint>(readback, MapMode.Read);
+
                     try
                     {
                         Assert.That(pixels[0, 0], Is.EqualTo(0xff0000ffu));
@@ -124,9 +127,10 @@ namespace osu.Framework.Tests.Graphics
             {
                 if (fail)
                     throw new InvalidOperationException();
+
                 releases++;
             });
-            Assert.Throws<InvalidOperationException>(() => frame.Dispose());
+            Assert.Throws<InvalidOperationException>(frame.Dispose);
             fail = false;
             frame.Dispose();
             Assert.That(releases, Is.EqualTo(1));

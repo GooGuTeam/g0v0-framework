@@ -48,7 +48,7 @@ namespace osu.Framework.Graphics.Veldrid
                 {
                     existing.FrameUsageIndex = currentExecutionIndex;
 
-                    available.Remove(existing);
+                    available.RemoveAt(i);
                     used.Add(existing);
 
                     resource = existing.Resource;
@@ -85,7 +85,7 @@ namespace osu.Framework.Graphics.Veldrid
                 if (framesSinceUsage >= Rendering.Renderer.RESOURCE_FREE_NO_USAGE_LENGTH)
                 {
                     item.Resource.Dispose();
-                    available.Remove(item);
+                    available.RemoveAt(0);
                 }
             }
 
@@ -98,6 +98,9 @@ namespace osu.Framework.Graphics.Veldrid
         /// <param name="executionIndex">The finished execution index.</param>
         private void executionFinished(ulong executionIndex)
         {
+            int firstCompletedIndex = -1;
+            int completedCount = 0;
+
             for (int i = 0; i < used.Count; i++)
             {
                 var item = used[i];
@@ -109,9 +112,17 @@ namespace osu.Framework.Graphics.Veldrid
                 if (item.FrameUsageIndex != executionIndex)
                     continue;
 
+                if (firstCompletedIndex == -1)
+                    firstCompletedIndex = i;
+
                 available.Add(item);
-                used.RemoveAt(i--);
+                completedCount++;
             }
+
+            // Matching usages are contiguous even if completion notifications arrive out of order.
+            // Remove them together so the remaining usages are only shifted once.
+            if (completedCount > 0)
+                used.RemoveRange(firstCompletedIndex, completedCount);
 
             updateStats();
         }

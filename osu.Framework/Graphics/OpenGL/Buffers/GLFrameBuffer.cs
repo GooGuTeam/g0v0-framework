@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -23,6 +23,9 @@ namespace osu.Framework.Graphics.OpenGL.Buffers
         public readonly int FrameBuffer;
 
         private readonly bool externalTexture;
+
+        // Every render buffer format is a depth format.
+        bool IFrameBuffer.HasDepth => attachedRenderBuffers.Count > 0;
 
         public GLFrameBuffer(GLRenderer renderer, TexturePixelFormat textureFormat, RenderbufferInternalFormat[]? renderBufferFormats = null, TextureFilteringMode filteringMode = TextureFilteringMode.Linear)
         {
@@ -81,7 +84,7 @@ namespace osu.Framework.Graphics.OpenGL.Buffers
 
                 glTexture.Width = (int)Math.Ceiling(size.X);
                 glTexture.Height = (int)Math.Ceiling(size.Y);
-                glTexture.SetData(new TextureUpload());
+                glTexture.SetData(glTexture.CreateEmptyUpload());
                 glTexture.Upload();
             }
         }
@@ -152,7 +155,7 @@ namespace osu.Framework.Graphics.OpenGL.Buffers
             {
                 BypassTextureUploadQueueing = true;
 
-                SetData(new TextureUpload());
+                SetData(CreateEmptyUpload());
                 Upload();
             }
 

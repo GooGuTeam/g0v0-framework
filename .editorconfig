@@ -19,9 +19,6 @@ indent_style = space
 indent_size = 4
 trim_trailing_whitespace = true
 
-#license header
-file_header_template = Copyright (c) GooGuTeam. Licensed under the MIT Licence.\nSee the LICENCE file in the repository root for full licence text.
-
 #Roslyn naming styles
 
 #PascalCase for public and protected members
@@ -210,6 +207,7 @@ csharp_style_prefer_primary_constructors = false
 dotnet_style_prefer_auto_properties = true:silent
 
 csharp_style_namespace_declarations = block_scoped:warning
+resharper_bad_expression_braces_line_breaks_highlighting = none
 
 [*.{yaml,yml}]
 insert_final_newline = true

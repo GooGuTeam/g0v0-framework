@@ -1,13 +1,11 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
-using osu.Framework.Graphics.Textures;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Bmp;
+using osu.Framework.Imaging;
 
 namespace osu.Framework.Platform.Windows
 {
@@ -85,7 +83,7 @@ namespace osu.Framework.Platform.Windows
                 bmp_header_field.CopyTo(buff, 0);
                 bytes.CopyTo(buff, bitmap_file_header_length);
 
-                return Image.Load<TPixel>(TextureUpload.DECODER_OPTIONS, buff);
+                return Image.Load<TPixel>(buff);
             });
         }
 
@@ -93,8 +91,7 @@ namespace osu.Framework.Platform.Windows
         {
             using (var stream = new MemoryStream())
             {
-                var encoder = image.Configuration.ImageFormatsManager.GetEncoder(BmpFormat.Instance);
-                image.Save(stream, encoder);
+                image.SaveAsBmp(stream);
 
                 int bitmapDataLength = (int)stream.Length - bitmap_file_header_length;
                 IntPtr unmanagedPointer = Marshal.AllocHGlobal(bitmapDataLength);

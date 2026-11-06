@@ -1,0 +1,25 @@
+﻿<Project>
+  <!-- With Veldrid.SPIRV as a project reference, its native library is copied as content under runtimes/<rid>/native/ and is absent from
+       deps.json, where the loader cannot find it. Copy the running platform's library beside the application, as the package's assets would be. -->
+  <PropertyGroup Condition="'$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe'">
+    <_G0V0SpirvArchitecture>$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant())</_G0V0SpirvArchitecture>
+    <!-- The package ships a single universal macOS library under runtimes/osx/. -->
+    <_G0V0SpirvRuntime Condition="$([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('osx'))">osx</_G0V0SpirvRuntime>
+    <_G0V0SpirvRuntime Condition="'$(_G0V0SpirvRuntime)' == '' and '$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</_G0V0SpirvRuntime>
+    <_G0V0SpirvRuntime Condition="'$(_G0V0SpirvRuntime)' == '' and $([MSBuild]::IsOSPlatform('Windows'))">win-$(_G0V0SpirvArchitecture)</_G0V0SpirvRuntime>
+    <_G0V0SpirvRuntime Condition="'$(_G0V0SpirvRuntime)' == '' and $([MSBuild]::IsOSPlatform('Linux'))">linux-$(_G0V0SpirvArchitecture)</_G0V0SpirvRuntime>
+    <_G0V0SpirvRuntime Condition="'$(_G0V0SpirvRuntime)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">osx</_G0V0SpirvRuntime>
+  </PropertyGroup>
+  <Target Name="G0V0CopySpirvBesideApplication" AfterTargets="CopyFilesToOutputDirectory" Condition="'$(_G0V0SpirvRuntime)' != ''">
+    <ItemGroup>
+      <_G0V0SpirvLibrary Include="$(OutDir)runtimes/$(_G0V0SpirvRuntime)/native/*veldrid-spirv.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_G0V0SpirvLibrary)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="G0V0PublishSpirvBesideApplication" AfterTargets="Publish" Condition="'$(_G0V0SpirvRuntime)' != ''">
+    <ItemGroup>
+      <_G0V0PublishedSpirvLibrary Include="$(PublishDir)runtimes/$(_G0V0SpirvRuntime)/native/*veldrid-spirv.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_G0V0PublishedSpirvLibrary)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

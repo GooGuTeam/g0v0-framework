@@ -30,6 +30,7 @@ namespace osu.Framework.Graphics.Video
                 throw new ArgumentOutOfRangeException(nameof(h264Profile));
             if (width < 2 || height < 2 || width > 3840 || height > 2160 || (width & 1) != 0 || (height & 1) != 0)
                 throw new ArgumentOutOfRangeException(nameof(width));
+
             Width = width;
             Height = height;
             FrameRate = frameRate;

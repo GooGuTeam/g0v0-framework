@@ -1,21 +1,16 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Buffers;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using osu.Framework.Allocation;
-using osu.Framework.Graphics.Textures;
+using osu.Framework.Imaging;
 using osu.Framework.Logging;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats;
-using SixLabors.ImageSharp.PixelFormats;
 using static SDL.SDL3;
 
 namespace osu.Framework.Platform.SDL3
@@ -25,19 +20,7 @@ namespace osu.Framework.Platform.SDL3
         /// <summary>
         /// Supported formats for decoding images from the clipboard.
         /// </summary>
-        // It's possible for a format to not have a registered decoder, but all default formats will have one:
-        // https://github.com/SixLabors/ImageSharp/discussions/1353#discussioncomment-9142056
-        private static IEnumerable<string> supportedImageMimeTypes => SixLabors.ImageSharp.Configuration.Default.ImageFormats.SelectMany(f => f.MimeTypes);
-
-        /// <summary>
-        /// Format used for encoding (saving) images to the clipboard.
-        /// </summary>
-        private readonly IImageFormat imageFormat;
-
-        public SDL3Clipboard(IImageFormat imageFormat)
-        {
-            this.imageFormat = imageFormat;
-        }
+        private static readonly string[] supported_image_mime_types = { "image/png", "image/jpeg", "image/bmp", "image/gif", "image/webp" };
 
         // SDL cannot differentiate between string.Empty and no text (eg. empty clipboard or an image)
         // doesn't matter as text editors don't really allow copying empty strings.
@@ -48,7 +31,7 @@ namespace osu.Framework.Platform.SDL3
 
         public override Image<TPixel>? GetImage<TPixel>()
         {
-            foreach (string mimeType in supportedImageMimeTypes)
+            foreach (string mimeType in supported_image_mime_types)
             {
                 if (tryGetData<TPixel>(mimeType, out var image))
                 {
@@ -68,7 +51,7 @@ namespace osu.Framework.Platform.SDL3
 
             using (var stream = new MemoryStream())
             {
-                image.Save(stream, imageFormat);
+                image.SaveAsPng(stream);
 
                 // The buffer is allowed to escape the lifetime of the MemoryStream.
                 // https://learn.microsoft.com/en-us/dotnet/api/system.io.memorystream.getbuffer?view=net-8.0
@@ -76,7 +59,7 @@ namespace osu.Framework.Platform.SDL3
                 memory = new ReadOnlyMemory<byte>(stream.GetBuffer(), 0, (int)stream.Length);
             }
 
-            return trySetData(imageFormat.DefaultMimeType, () => memory);
+            return trySetData("image/png", () => memory);
         }
 
         private static unsafe bool tryGetData<TPixel>(string mimeType, out Image<TPixel>? data) where TPixel : unmanaged, IPixel<TPixel>
@@ -100,7 +83,7 @@ namespace osu.Framework.Platform.SDL3
             try
             {
                 var nativeMemory = new ReadOnlySpan<byte>((void*)pointer, (int)nativeSize);
-                data = Image.Load<TPixel>(TextureUpload.DECODER_OPTIONS, nativeMemory);
+                data = Image.Load<TPixel>(nativeMemory);
                 return true;
             }
             catch (Exception e)

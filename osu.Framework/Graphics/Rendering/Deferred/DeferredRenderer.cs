@@ -16,8 +16,7 @@ using osu.Framework.Graphics.Veldrid.Textures;
 using osu.Framework.Platform;
 using osuTK;
 using osuTK.Graphics;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using osu.Framework.Imaging;
 using Veldrid;
 using Texture = Veldrid.Texture;
 
@@ -46,6 +45,8 @@ namespace osu.Framework.Graphics.Rendering.Deferred
             Context = new DeferredContext(this);
 
             MaxTextureSize = VeldridDevice.MaxTextureSize;
+            VeldridTextureSizeProbe.Run(VeldridDevice.Device, this);
+            VeldridBindlessTextureProbe.Run(VeldridDevice.Device, this);
         }
 
         protected internal override void BeginFrame(Vector2 windowSize)
@@ -70,6 +71,9 @@ namespace osu.Framework.Graphics.Rendering.Deferred
             new EventProcessor(Context).ProcessEvents();
             Graphics.End();
         }
+
+        // See VeldridRenderer.BindsTextureSlots: launches on Vulkan crashed with heap corruption in three of four attempts.
+        protected override bool BindsTextureSlots => Device.BackendType != GraphicsBackend.Vulkan;
 
         protected override bool SetTextureImplementation(INativeTexture? texture, int unit)
         {
@@ -142,11 +146,16 @@ namespace osu.Framework.Graphics.Rendering.Deferred
         void IVeldridRenderer.GenerateMipmaps(VeldridTexture texture)
             => Graphics.Commands.GenerateMipmaps(texture.GetResourceList().Single().Texture);
 
+        void IVeldridRenderer.GenerateMipmaps(VeldridTexture texture, RectangleI region)
+            => VeldridTexture.GenerateRegionMipmaps(this, Graphics.Commands, texture, region);
+
         public void RegisterUniformBufferForReset(IVeldridUniformBuffer veldridUniformBuffer)
             => uniformBufferResetList.Add(veldridUniformBuffer);
 
         bool IVeldridRenderer.UseStructuredBuffers
             => VeldridDevice.UseStructuredBuffers;
+
+        bool IVeldridRenderer.UsesBindlessTextures => false;
 
         GraphicsSurfaceType IVeldridRenderer.SurfaceType
             => VeldridDevice.SurfaceType;
@@ -210,12 +219,21 @@ namespace osu.Framework.Graphics.Rendering.Deferred
 
         void IRenderer.EnterDrawNode(DrawNode node)
         {
+            // These markers are consumed only by the optional event log.
+            if (string.IsNullOrEmpty(FrameworkEnvironment.DeferredRendererEventsOutputPath))
+                return;
+
             drawNodeStack.Push(node);
             Context.EnqueueEvent(DrawNodeActionEvent.Create(this, node, DrawNodeActionType.Enter));
         }
 
         void IRenderer.ExitDrawNode()
-            => Context.EnqueueEvent(DrawNodeActionEvent.Create(this, drawNodeStack.Pop(), DrawNodeActionType.Exit));
+        {
+            if (string.IsNullOrEmpty(FrameworkEnvironment.DeferredRendererEventsOutputPath))
+                return;
+
+            Context.EnqueueEvent(DrawNodeActionEvent.Create(this, drawNodeStack.Pop(), DrawNodeActionType.Exit));
+        }
 
         protected override IShaderPart CreateShaderPart(IShaderStore store, string name, byte[]? rawData, ShaderPartType partType)
             => new VeldridShaderPart(this, rawData, partType, store);
@@ -227,8 +245,8 @@ namespace osu.Framework.Graphics.Rendering.Deferred
             => new DeferredFrameBuffer(this, textureFormat, renderBufferFormats?.ToPixelFormats(), filteringMode);
 
         protected override INativeTexture CreateNativeTexture(int width, int height, bool manualMipmaps = false, TextureFilteringMode filteringMode = TextureFilteringMode.Linear,
-                                                              Color4? initialisationColour = null)
-            => new VeldridTexture(this, width, height, TexturePixelFormat.R8G8B8A8Float, manualMipmaps, filteringMode, initialisationColour);
+                                                              Color4? initialisationColour = null, TexturePixelFormat textureFormat = TexturePixelFormat.R8G8B8A8Float)
+            => new VeldridTexture(this, width, height, textureFormat, manualMipmaps, filteringMode, initialisationColour);
 
         protected override INativeTexture CreateNativeVideoTexture(int width, int height)
             => new VeldridVideoTexture(this, width, height);

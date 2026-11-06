@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Runtime.InteropServices;
@@ -90,6 +90,9 @@ namespace osu.Framework.iOS
             NativeLibrary.SetDllImportResolver(typeof(BassFx).Assembly, (_, assembly, path) => NativeLibrary.Load("@rpath/bass_fx.framework/bass_fx", assembly, path));
             NativeLibrary.SetDllImportResolver(typeof(BassMix).Assembly, (_, assembly, path) => NativeLibrary.Load("@rpath/bassmix.framework/bassmix", assembly, path));
             NativeLibrary.SetDllImportResolver(typeof(SDL3).Assembly, (_, assembly, path) => NativeLibrary.Load("@rpath/SDL3.framework/SDL3", assembly, path));
+            // osu.Framework's image codecs ship as an embedded framework; its other imports (system libraries) resolve as usual.
+            NativeLibrary.SetDllImportResolver(typeof(Game).Assembly, (name, assembly, path) =>
+                name == "g0v0-image-codecs" ? NativeLibrary.Load("@rpath/g0v0-image-codecs.framework/g0v0-image-codecs", assembly, path) : IntPtr.Zero);
         }
 
         private class OutputVolumeObserver : NSObject

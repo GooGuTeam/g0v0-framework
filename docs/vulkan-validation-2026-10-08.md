@@ -14,8 +14,8 @@ Layer directory: `%LOCALAPPDATA%\g0v0-tools\vulkan\1.4.363.0\Bin`.
 Run from framework root:
 
 ```powershell
-# Build first. Keep UseLocalVeldrid consistent across restore/build.
-dotnet build osu.Framework.Tests/osu.Framework.Tests.csproj -p:UseLocalVeldrid=true
+# Build first. Keep G0V0SourceVeldrid consistent across restore/build.
+dotnet build osu.Framework.Tests/osu.Framework.Tests.csproj -p:G0V0SourceVeldrid=true
 powershell -NoProfile -File tools/RunVulkanValidation.ps1 -Renderer veldrid
 powershell -NoProfile -File tools/RunVulkanValidation.ps1 -Renderer deferred
 ```

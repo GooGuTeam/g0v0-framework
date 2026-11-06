@@ -104,7 +104,7 @@ namespace osu.Framework.Graphics.Veldrid
                                 if (statistics.PresentCount != 0)
                                 {
                                     // DXGI_FRAME_PRESENTATION_MODE: Composed = 0, Overlay = 1, None = 2.
-                                    composed = (int)statistics.CompositionMode == 0;
+                                    composed = statistics.CompositionMode == 0;
                                     hardwareOverlay = (int)statistics.CompositionMode == 1;
                                 }
                             }

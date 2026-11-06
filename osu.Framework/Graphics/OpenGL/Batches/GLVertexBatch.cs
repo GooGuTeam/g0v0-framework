@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -75,6 +75,7 @@ namespace osu.Framework.Graphics.OpenGL.Batches
         public void Add(T v)
         {
             renderer.SetActiveBatch(this);
+            renderer.StampMaskingIndex(ref v);
 
             if (currentBufferIndex < VertexBuffers.Count && currentVertexIndex >= currentVertexBuffer.Size)
             {
@@ -95,6 +96,33 @@ namespace osu.Framework.Graphics.OpenGL.Batches
             }
 
             ++currentVertexIndex;
+        }
+
+        public bool TryAddQuad(ReadOnlySpan<T> vertices)
+        {
+            if (vertices.Length != IRenderer.VERTICES_PER_QUAD)
+                throw new ArgumentException(@"A quad must contain exactly four vertices.", nameof(vertices));
+
+            // Preserve individual submission semantics when callers have left a partial primitive.
+            if (Size < 1 || currentVertexIndex % IRenderer.VERTICES_PER_QUAD != 0)
+                return false;
+
+            renderer.SetActiveBatch(this);
+            Span<T> scratch = stackalloc T[IRenderer.VERTICES_PER_QUAD];
+            ReadOnlySpan<T> stamped = renderer.StampMaskingIndex(vertices, scratch);
+
+            if (currentBufferIndex < VertexBuffers.Count && currentVertexIndex >= currentVertexBuffer.Size)
+            {
+                Draw();
+                FrameStatistics.Increment(StatisticsCounterType.VBufOverflow);
+            }
+
+            while (currentBufferIndex >= VertexBuffers.Count)
+                VertexBuffers.Add(CreateVertexBuffer(renderer));
+
+            currentVertexBuffer.SetVertices(currentVertexIndex, stamped, ref changeBeginIndex, ref changeEndIndex);
+            currentVertexIndex += IRenderer.VERTICES_PER_QUAD;
+            return true;
         }
 
         /// <summary>

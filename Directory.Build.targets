@@ -1,0 +1,22 @@
+﻿<Project>
+  <!-- Builds normally restore the published g0v0.Veldrid packages. To try unreleased renderer changes locally, check out g0v0-veldrid beside
+       this repository and pass -p:G0V0SourceVeldrid=true (or -p:G0V0SourceBuild=true, which the client also understands) to reference its
+       projects instead. Source references are for local development only: packing is rejected, and CI and releases use packages. -->
+  <PropertyGroup>
+    <_G0V0VeldridRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../g0v0-veldrid/'))</_G0V0VeldridRoot>
+    <G0V0SourceVeldrid Condition="'$(G0V0SourceVeldrid)' == '' and '$(G0V0SourceBuild)' == 'true'">true</G0V0SourceVeldrid>
+  </PropertyGroup>
+  <Target Name="G0V0ValidateSourceVeldrid" BeforeTargets="CollectPackageReferences;PrepareForBuild" Condition="'$(G0V0SourceVeldrid)' == 'true'">
+    <Error Condition="!Exists('$(_G0V0VeldridRoot)src/Veldrid/Veldrid.csproj')" Text="G0V0SourceVeldrid requires a g0v0-veldrid checkout at $(_G0V0VeldridRoot)." />
+  </Target>
+  <ItemGroup Condition="'$(G0V0SourceVeldrid)' == 'true' and '$(MSBuildProjectName)' == 'osu.Framework'">
+    <PackageReference Remove="g0v0.Veldrid;g0v0.Veldrid.SPIRV" />
+    <ProjectReference Include="$(_G0V0VeldridRoot)src/Veldrid/Veldrid.csproj" />
+    <!-- iOS uses Metal only. Android keeps SPIRV for its Vulkan backend; the client packages its native library (see g0v0's build/SourceDependencies.targets). -->
+    <ProjectReference Include="$(_G0V0VeldridRoot)src/Veldrid.SPIRV/Veldrid.SPIRV.csproj" Condition="'$(TargetPlatformIdentifier)' != 'ios'" />
+  </ItemGroup>
+  <Import Project="$(MSBuildThisFileDirectory)build/SpirvBesideApplication.targets" Condition="'$(G0V0SourceVeldrid)' == 'true'" />
+  <Target Name="G0V0RejectSourceVeldridPack" BeforeTargets="GenerateNuspec" Condition="'$(G0V0SourceVeldrid)' == 'true'">
+    <Error Text="Packages must reference the published renderer packages. Pack without G0V0SourceVeldrid / G0V0SourceBuild." />
+  </Target>
+</Project>

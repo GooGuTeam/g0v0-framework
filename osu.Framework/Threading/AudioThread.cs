@@ -80,6 +80,7 @@ namespace osu.Framework.Threading
             }
 
             manager.GlobalMixerHandle.BindTo(globalMixerHandle);
+            manager.WasapiLatencyMilliseconds.BindTo(wasapiLatencyMilliseconds);
         }
 
         internal void UnregisterManager(AudioManager manager)
@@ -88,6 +89,7 @@ namespace osu.Framework.Threading
                 managers.Remove(manager);
 
             manager.GlobalMixerHandle.UnbindFrom(globalMixerHandle);
+            manager.WasapiLatencyMilliseconds.UnbindFrom(wasapiLatencyMilliseconds);
         }
 
         protected override void OnExit()
@@ -133,7 +135,9 @@ namespace osu.Framework.Threading
         /// </summary>
         private readonly Bindable<int?> globalMixerHandle = new Bindable<int?>();
 
-        internal bool InitDevice(int deviceId, bool useWasapi, bool isExclusive, double buffer, double period)
+        private readonly Bindable<double?> wasapiLatencyMilliseconds = new Bindable<double?>();
+
+        internal bool InitDevice(int deviceId, bool useWasapi, bool isExclusive, double buffer, double period, bool useSamples)
         {
             Debug.Assert(ThreadSafety.IsAudioThread);
             Trace.Assert(deviceId != -1); // The real device ID should always be used, as the -1 device has special cases which are hard to work with.
@@ -148,7 +152,7 @@ namespace osu.Framework.Threading
 
             if (useWasapi)
             {
-                if (!attemptWasapiInitialisation(deviceId, isExclusive, buffer, period))
+                if (!attemptWasapiInitialisation(deviceId, isExclusive, buffer, period, useSamples))
                     return false;
             }
 
@@ -190,7 +194,7 @@ namespace osu.Framework.Threading
             }
         }
 
-        private bool attemptWasapiInitialisation(int deviceId, bool isExclusive, double buffer, double period)
+        private bool attemptWasapiInitialisation(int deviceId, bool isExclusive, double buffer, double period, bool useSamples)
         {
             if (RuntimeInfo.OS != RuntimeInfo.Platform.Windows)
                 return false;
@@ -231,10 +235,10 @@ namespace osu.Framework.Threading
 
             // To keep things in a sane state let's only keep one device initialised via wasapi.
             freeWasapi();
-            return initWasapi(wasapiDevice, isExclusive, buffer, period);
+            return initWasapi(wasapiDevice, isExclusive, buffer, period, useSamples);
         }
 
-        private bool initWasapi(int wasapiDevice, bool isExclusive, double buffer, double period)
+        private bool initWasapi(int wasapiDevice, bool isExclusive, double buffer, double period, bool useSamples)
         {
             wasapiNotifyProcedure = (notify, device, _) => Scheduler.Add(() =>
             {
@@ -256,7 +260,8 @@ namespace osu.Framework.Threading
             if (period < 1e-5)
                 v = isExclusive ? 0f : float.Epsilon;
 
-            var flags = WasapiInitFlags.EventDriven | WasapiInitFlags.AutoFormat | (isExclusive ? WasapiInitFlags.Exclusive : 0);
+            var flags = WasapiInitFlags.EventDriven | WasapiInitFlags.AutoFormat | (isExclusive ? WasapiInitFlags.Exclusive : 0)
+                        | (useSamples ? WasapiInitFlags.Samples : 0);
 
             bool initialised;
 
@@ -361,12 +366,17 @@ namespace osu.Framework.Threading
                 return false;
             }
 
+            // GetInfo reports the allocated buffer, including driver rounding and exclusive double buffering.
+            // BASSWASAPI buffer lengths use the callback's floating-point sample format.
+            wasapiLatencyMilliseconds.Value = 1000.0 * wasapiInfo.BufferLength / (wasapiInfo.Frequency * wasapiInfo.Channels * sizeof(float));
+            Logger.Log($"WASAPI buffer latency estimate: {wasapiLatencyMilliseconds.Value:0.###} ms ({wasapiInfo.Frequency} Hz, {wasapiInfo.InitFlags}).");
             BassWasapi.SetNotify(wasapiNotifyProcedure);
             return true;
         }
 
         private void freeWasapi()
         {
+            wasapiLatencyMilliseconds.Value = null;
             // Stop and join the native producer before clearing/freeing its mixer or capture memory.
             if (RuntimeInfo.OS == RuntimeInfo.Platform.Windows)
             {

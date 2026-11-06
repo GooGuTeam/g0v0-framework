@@ -1,7 +1,8 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
+using osu.Framework.Graphics.Primitives;
 using osu.Framework.Graphics.Rendering;
 using osu.Framework.Graphics.Veldrid.Shaders;
 using osu.Framework.Graphics.Veldrid.Textures;
@@ -40,6 +41,11 @@ namespace osu.Framework.Graphics.Veldrid
         /// Whether to use shader storage structured buffers if possible.
         /// </summary>
         bool UseStructuredBuffers { get; }
+
+        /// <summary>
+        /// Whether the default texture shader samples a bindless texture table (see <see cref="VeldridBindlessTextures"/>).
+        /// </summary>
+        bool UsesBindlessTextures { get; }
 
         /// <summary>
         /// Binds the given shader.
@@ -97,5 +103,12 @@ namespace osu.Framework.Graphics.Veldrid
         /// </summary>
         /// <param name="texture">The texture.</param>
         void GenerateMipmaps(VeldridTexture texture);
+
+        /// <summary>
+        /// Regenerates the automatic mipmap levels covering an aligned region of the given single-resource texture.
+        /// </summary>
+        /// <param name="texture">The texture.</param>
+        /// <param name="region">The region, aligned to <c>1 &lt;&lt; IRenderer.MAX_MIPMAP_LEVELS</c> texels.</param>
+        void GenerateMipmaps(VeldridTexture texture, RectangleI region);
     }
 }

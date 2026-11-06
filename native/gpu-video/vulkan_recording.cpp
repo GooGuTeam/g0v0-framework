@@ -5,6 +5,7 @@
 #include <vulkan/vulkan.h>
 #include <dxgi1_2.h>
 #include "recorder.cpp"
+#include "video_decoder.h"
 #include <stdexcept>
 
 // One worker owns this bridge; queue submission is marshalled to Veldrid's draw thread.

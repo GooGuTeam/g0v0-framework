@@ -124,6 +124,9 @@ namespace osu.Framework.Graphics.Veldrid
                 case TexturePixelFormat.R16Float:
                     return PixelFormat.R16Float;
 
+                case TexturePixelFormat.R8Float:
+                    return PixelFormat.R8UNorm;
+
                 default:
                     throw new ArgumentException($"Unsupported render buffer format: {texturePixelFormat}", nameof(texturePixelFormat));
             }

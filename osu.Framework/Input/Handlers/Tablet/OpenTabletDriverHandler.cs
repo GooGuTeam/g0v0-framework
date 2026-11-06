@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using OpenTabletDriver;
 using OpenTabletDriver.Plugin;
@@ -85,6 +86,7 @@ namespace osu.Framework.Input.Handlers.Tablet
             {
                 resetFilters();
                 reportRate.Reset();
+
                 if (enabled.NewValue)
                 {
                     lastInitTask = Task.Run(() =>
@@ -120,10 +122,12 @@ namespace osu.Framework.Input.Handlers.Tablet
             lastTabletDeviceType = TabletPenDeviceType.Unknown;
             if (!float.IsFinite(pos.X) || !float.IsFinite(pos.Y))
                 return;
+
             lock (filterSync)
             {
                 if (!Enabled.Value || !windowActive.Value)
                     return;
+
                 var position = filter.FilterPosition(new Vector2(pos.X, pos.Y), reportTime, PositionSmoothing.Value,
                     millimetresPerPixel.X > 0 && millimetresPerPixel.Y > 0 ? RadialSmoothingStrength.Value : 0,
                     millimetresPerPixel);
@@ -151,7 +155,7 @@ namespace osu.Framework.Input.Handlers.Tablet
 
         private Vector2 millimetresPerPixel;
 
-        private readonly object filterSync = new object();
+        private readonly Lock filterSync = new Lock();
         private readonly TabletInputFilter filter = new TabletInputFilter();
         private static double reportTime => Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
 
@@ -166,6 +170,7 @@ namespace osu.Framework.Input.Handlers.Tablet
                 }
                 else
                     filter.Flush(reportTime, ButtonDebounce.Value, emitButton);
+
                 base.CollectPendingInputs(inputs);
             }
         }
@@ -196,6 +201,7 @@ namespace osu.Framework.Input.Handlers.Tablet
             {
                 if (!Enabled.Value || !windowActive.Value)
                     return;
+
                 double now = reportTime;
                 filter.SetButton(key, pressed, now);
                 filter.Flush(now, ButtonDebounce.Value, emitButton);
@@ -220,6 +226,7 @@ namespace osu.Framework.Input.Handlers.Tablet
 
             if (!float.IsFinite(pressure))
                 return;
+
             pressure = Math.Clamp(pressure, 0f, 1f);
 
             float releaseThreshold = PressureThreshold.Value - hysteresis_half;
@@ -249,6 +256,7 @@ namespace osu.Framework.Input.Handlers.Tablet
                 filter.Reset(emitButton);
                 penPressed = false;
             }
+
             reportRate.Reset();
             device = tablets.Any() ? tabletDriver?.InputDevices.First() : null;
 

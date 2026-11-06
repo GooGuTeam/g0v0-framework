@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
@@ -69,12 +69,13 @@ namespace osu.Framework.Graphics.Sprites
         {
             localisedText = localisation.GetLocalisedBindableString(text);
 
+            // The default texture shader also reads single-channel glyph atlases, so text batches with sprites and boxes.
             TextureShader = shaders.Load(VertexShaderDescriptor.TEXTURE_2, FragmentShaderDescriptor.TEXTURE);
 
             // Pre-cache the characters in the texture store
             foreach (char character in localisedText.Value)
             {
-                _ = store.Get(font.FontName, character) ?? store.Get(null, character);
+                _ = store.GetForSize(font.FontName, character, font.Size) ?? store.GetForSize(null, character, font.Size);
             }
         }
 
@@ -438,6 +439,8 @@ namespace osu.Framework.Graphics.Sprites
         /// </summary>
         private readonly List<TextBuilderGlyph> charactersBacking = new List<TextBuilderGlyph>();
 
+        private long charactersVersion;
+
         /// <summary>
         /// The characters in local space.
         /// </summary>
@@ -497,6 +500,7 @@ namespace osu.Framework.Graphics.Sprites
                 base.Width = Math.Min(base.Width, MaxWidth);
 
                 charactersCache.Validate();
+                charactersVersion++;
             }
         }
 

@@ -12,8 +12,8 @@ namespace osu.Framework.Audio.Callbacks
     /// </summary>
     public sealed class MixerAudioCapture : IDisposable
     {
-        public const int SampleRate = 44100;
-        public const int Channels = 2;
+        public const int SAMPLE_RATE = 44100;
+        public const int CHANNELS = 2;
 
         private readonly MixerAudioCaptureHub hub;
         private readonly NativeWasapiRecordingSource? nativeSource;
@@ -38,15 +38,15 @@ namespace osu.Framework.Audio.Callbacks
         public void Read(float[] destination, int frames)
         {
             ObjectDisposedException.ThrowIf(IsDisposed, this);
-            if (frames <= 0 || frames > SampleRate || destination.Length < frames * Channels)
+            if (frames <= 0 || frames > SAMPLE_RATE || destination.Length < frames * CHANNELS)
                 throw new ArgumentOutOfRangeException(nameof(frames));
 
-            Array.Clear(destination, 0, frames * Channels);
+            Array.Clear(destination, 0, frames * CHANNELS);
             foreach (var source in hub.Sources)
                 source.Mix(this, destination, Position, frames);
             nativeSource?.Mix(destination, Position, frames);
             hub.ReleaseDrainedSources();
-            for (int i = 0; i < frames * Channels; i++)
+            for (int i = 0; i < frames * CHANNELS; i++)
                 destination[i] = float.IsFinite(destination[i]) ? Math.Clamp(destination[i], -1, 1) : 0;
             Position += frames;
         }

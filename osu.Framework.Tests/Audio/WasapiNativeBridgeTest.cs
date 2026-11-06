@@ -5,7 +5,6 @@ using System;
 using System.Runtime.InteropServices;
 using NUnit.Framework;
 using osu.Framework.Audio.Callbacks;
-using osu.Framework.Platform;
 
 namespace osu.Framework.Tests.Audio
 {
@@ -84,7 +83,7 @@ namespace osu.Framework.Tests.Audio
             if (RuntimeInfo.OS != RuntimeInfo.Platform.Windows)
                 return;
 
-            Assert.IsTrue(WasapiNativeBridge.TryGetNativeProcedure(out IntPtr proc1, out IntPtr ctx1));
+            Assert.IsTrue(WasapiNativeBridge.TryGetNativeProcedure(out _, out _));
             Assert.IsTrue(WasapiNativeBridge.IsNativeActive);
 
             WasapiNativeBridge.Free();

@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System.Runtime.InteropServices;
 using osu.Framework.Graphics.Shaders.Types;
@@ -34,5 +34,10 @@ namespace osu.Framework.Graphics.Rendering
         public UniformFloat InnerCornerRadius;
         public UniformInt WrapModeS;
         public UniformInt WrapModeT;
+
+        public UniformInt MaskingIndex;
+        public UniformInt SingleChannelSlots;
+        public UniformInt NearestSlots;
+        private readonly UniformPadding4 pad4;
     }
 }

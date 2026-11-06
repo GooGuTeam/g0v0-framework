@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -22,6 +22,7 @@ namespace osu.Framework.Graphics.Rendering.Deferred
         private readonly Dictionary<(ChunkReference, ResourceLayout), ResourceSet> bufferChunks = new Dictionary<(ChunkReference, ResourceLayout), ResourceSet>();
 
         private TData data;
+        private bool hasDataThisFrame;
         private ChunkReference currentChunk;
 
         public DeferredUniformBuffer(DeferredRenderer renderer)
@@ -36,7 +37,12 @@ namespace osu.Framework.Graphics.Rendering.Deferred
             get => data;
             set
             {
+                // The first write must allocate a range for this frame, even when the data is all zeroes.
+                if (hasDataThisFrame && data.Equals(value))
+                    return;
+
                 data = value;
+                hasDataThisFrame = true;
 
                 renderer.Context.EnqueueEvent(SetUniformBufferDataEvent.Create(renderer, this, value));
                 renderer.RegisterUniformBufferForReset(this);
@@ -80,6 +86,7 @@ namespace osu.Framework.Graphics.Rendering.Deferred
                 bufferChunks.Remove(key);
 
             data = default;
+            hasDataThisFrame = false;
             currentChunk = default;
             dead_chunks.Clear();
         }
