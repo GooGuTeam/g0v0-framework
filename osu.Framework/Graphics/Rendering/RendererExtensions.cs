@@ -214,16 +214,17 @@ namespace osu.Framework.Graphics.Rendering
             inflationAmount = inflationPercentage.HasValue ? new Vector2(inflationPercentage.Value.X * texRect.Width, inflationPercentage.Value.Y * texRect.Height) : Vector2.Zero;
 
             // Capture coordinates before expanding the clamp bounds, just as in ordinary quad drawing.
-            if (renderer.CurrentWrapModeS == WrapMode.ClampToEdge || renderer.CurrentWrapModeT == WrapMode.ClampToEdge)
+            if (texture.IsAtlasTexture && (renderer.CurrentWrapModeS == WrapMode.ClampToEdge || renderer.CurrentWrapModeT == WrapMode.ClampToEdge))
             {
                 Vector2 inflationVector = Vector2.Zero;
 
+                // The padding is measured in texels of the backing atlas; texRect is in normalised coordinates.
                 const int mipmap_padding_requirement = (1 << IRenderer.MAX_MIPMAP_LEVELS) / 2;
 
                 if (renderer.CurrentWrapModeS == WrapMode.ClampToEdge)
-                    inflationVector.X = mipmap_padding_requirement / (float)texture.Width;
+                    inflationVector.X = mipmap_padding_requirement / (float)texture.NativeTexture.Width;
                 if (renderer.CurrentWrapModeT == WrapMode.ClampToEdge)
-                    inflationVector.Y = mipmap_padding_requirement / (float)texture.Height;
+                    inflationVector.Y = mipmap_padding_requirement / (float)texture.NativeTexture.Height;
                 texRect = texRect.Inflate(inflationVector);
             }
 
