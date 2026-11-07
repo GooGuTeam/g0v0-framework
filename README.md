@@ -58,6 +58,19 @@ dotnet test osu.Framework.Tests/bin/Debug/net10.0/osu.Framework.Tests.dll --filt
 The OpenGL test runs both differential scenes within one context; the Veldrid fallback test also checks that switching from
 stamped vertices to a global-uniform shader consumes the latest mask, including when that mask has not changed at the switch.
 
+### Scrolling waveform CPU work
+
+Waveform draw nodes cache frequency colours until the resampled points or palette change, while applying the current drawable
+colour and opacity at draw time. Quad dimensions are computed once per segment. Deferred storage-buffer writes retain their
+previous contents on the CPU and upload each buffer's dirty range once before rendering, rather than updating every mask separately.
+
+A Debug, multithreaded Deferred Direct3D 11 HitSounding run with real music, approximately 40 visible objects and 200 lane cells
+measured draw Work at 5.48 ms mean / 6.26 ms P95 with the original compiled framework, versus 3.53 ms / 3.70 ms with the final changes.
+These are CPU Work measurements, not a guarantee of 165 Hz presentation or measurements on other backends.
+Four isolated waveform captures (palette, opacity, resize and scroll changes) match the original renderer pixel-for-pixel.
+`DeferredStorageBufferGpuTest.TestMasksMatchImmediateAcrossBuffersAndFrames` compares GPU output against the immediate renderer
+across 4,225 masks, multiple storage buffers and sparse changes over three frames; run this explicit test on Windows with Direct3D 11.
+
 ## Contributing
 
 Contributions can be made via pull requests to this repository.
