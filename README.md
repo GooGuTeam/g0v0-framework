@@ -81,6 +81,9 @@ it does not assume that a fixed 50 ms sleep is sufficient on every CI runner.
 OSU_EXECUTION_MODE=SingleThread dotnet test osu.Framework.Tests/osu.Framework.Tests.csproj -c Debug --filter FullyQualifiedName~osu.Framework.Tests.Audio.TrackBassTest
 ```
 
+`InterpolatingFramedClockTest.TestNoInterpolationDrift` compares interpolation against the source snapshot taken during the same
+frame. The 1 ms drift tolerance must not include time spent descheduled between processing a frame and reading a live stopwatch.
+
 ## Contributing
 
 Contributions can be made via pull requests to this repository.

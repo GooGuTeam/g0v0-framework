@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Threading;
@@ -259,7 +259,8 @@ namespace osu.Framework.Tests.Clocks
         {
             var stopwatch = new StopwatchClock();
 
-            interpolating.ChangeSource(stopwatch);
+            var framedStopwatch = new FramedClock(stopwatch);
+            interpolating.ChangeSource(framedStopwatch);
 
             source.Start();
             stopwatch.Start();
@@ -267,7 +268,8 @@ namespace osu.Framework.Tests.Clocks
             while (interpolating.CurrentTime <= 1000)
             {
                 interpolating.ProcessFrame();
-                Assert.That(interpolating.CurrentTime, Is.EqualTo(stopwatch.CurrentTime).Within(1));
+                // Compare the same frame's source sample, not a stopwatch which advances after ProcessFrame().
+                Assert.That(interpolating.CurrentTime, Is.EqualTo(framedStopwatch.CurrentTime).Within(1));
 
                 Thread.Sleep(updateRate);
             }
