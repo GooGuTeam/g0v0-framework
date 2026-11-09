@@ -9,6 +9,7 @@ using NUnit.Framework;
 using osu.Framework.Audio.Mixing;
 using osu.Framework.Audio.Mixing.Bass;
 using osu.Framework.Development;
+using osu.Framework.IO.Stores;
 
 namespace osu.Framework.Tests.Audio
 {
@@ -36,6 +37,7 @@ namespace osu.Framework.Tests.Audio
                 generatedSamples += data.Length / 2;
                 return length;
             };
+
             try
             {
                 using var mixer = new OfflineAudioMixer();
@@ -43,11 +45,13 @@ namespace osu.Framework.Tests.Audio
                 Assert.That(stream, Is.Not.Zero);
                 Assert.That(BassMix.MixerAddChannel(((BassAudioMixer)mixer.Mixer).Handle, stream, BassFlags.MixerChanNoRampin), Is.True);
                 float[] output = new float[1600];
+
                 for (int i = 0; i < 600; i++)
                 {
                     mixer.Read(output, 800);
                     Assert.That(output, Is.All.EqualTo(0.125f).Within(0.0001));
                 }
+
                 Assert.That(generatedSamples, Is.EqualTo(480000));
                 GC.KeepAlive(source);
             }
@@ -72,10 +76,12 @@ namespace osu.Framework.Tests.Audio
             Assert.That(initialised || Bass.LastError == Errors.Already, Is.True);
             Bass.CurrentDevice = 0;
             ThreadSafety.IsAudioThread = true;
+
             try
             {
                 using var mixer = new OfflineAudioMixer();
                 float[] samples = new float[1600];
+
                 for (int i = 0; i < 600; i++)
                 {
                     System.Array.Fill(samples, 1f);
@@ -105,6 +111,7 @@ namespace osu.Framework.Tests.Audio
 
             // Generate a simple 16-bit mono 48000 Hz WAV with 800 samples of 0.25 amplitude
             byte[] wavData;
+
             using (var ms = new System.IO.MemoryStream())
             using (var writer = new System.IO.BinaryWriter(ms))
             {
@@ -119,7 +126,7 @@ namespace osu.Framework.Tests.Audio
                 writer.Write(16);
                 writer.Write((short)1); // PCM
                 writer.Write((short)1); // Mono
-                writer.Write(48000);   // SampleRate
+                writer.Write(48000); // SampleRate
                 writer.Write(48000 * 2); // ByteRate
                 writer.Write((short)2); // BlockAlign
                 writer.Write((short)16); // BitsPerSample
@@ -132,6 +139,7 @@ namespace osu.Framework.Tests.Audio
             }
 
             int sampleId = 0;
+
             try
             {
                 using var handle = new GCHandleWrapper(GCHandle.Alloc(wavData, GCHandleType.Pinned));
@@ -179,6 +187,7 @@ namespace osu.Framework.Tests.Audio
             Bass.CurrentDevice = 0;
             ThreadSafety.IsAudioThread = true;
             int stream = 0;
+
             try
             {
                 using var mixer = new OfflineAudioMixer();
@@ -209,11 +218,62 @@ namespace osu.Framework.Tests.Audio
             }
         }
 
+        [Test]
+        public void TrackCompletionInOfflineMixer()
+        {
+            int previousDevice = Bass.CurrentDevice;
+            bool initialised = Bass.Init(Bass.NoSoundDevice);
+            Assert.That(initialised || Bass.LastError == Errors.Already, Is.True);
+            Bass.CurrentDevice = Bass.NoSoundDevice;
+
+            try
+            {
+                using var mixer = new OfflineAudioMixer();
+                using var resources = new ResourceStore<byte[]>(new DllResourceStore(typeof(OfflineAudioMixerTest).Assembly));
+                var audio = mixer.CreateAudioManager(resources);
+
+                try
+                {
+                    var track = audio.Tracks.Get(@"Resources.Tracks.sample-track.mp3");
+                    audio.Update();
+                    Assert.That(track.IsLoaded, Is.True);
+                    track.Seek(Math.Max(0, track.Length - 100));
+                    track.Start();
+                    float[] output = new float[400];
+
+                    for (int i = 0; i < 240; i++)
+                    {
+                        audio.Update();
+                        mixer.Read(output, 200);
+                    }
+
+                    audio.Update();
+                    Assert.That(track.HasCompleted, Is.True);
+                }
+                finally
+                {
+                    audio.Dispose();
+                    audio.Update();
+                }
+            }
+            finally
+            {
+                if (initialised)
+                    Bass.Free();
+                if (previousDevice >= 0)
+                    Bass.CurrentDevice = previousDevice;
+            }
+        }
+
         private sealed class GCHandleWrapper : IDisposable
         {
             public GCHandle Handle { get; }
             public GCHandleWrapper(GCHandle handle) => Handle = handle;
-            public void Dispose() { if (Handle.IsAllocated) Handle.Free(); }
+
+            public void Dispose()
+            {
+                if (Handle.IsAllocated) Handle.Free();
+            }
         }
     }
 }

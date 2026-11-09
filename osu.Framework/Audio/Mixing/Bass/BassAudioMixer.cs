@@ -244,7 +244,9 @@ namespace osu.Framework.Audio.Mixing.Bass
         /// <param name="user">User instance data to pass to the callback function.</param>
         /// <returns>If successful, then the new synchroniser's handle is returned, else 0 is returned. Use <see cref="ManagedBass.Bass.LastError" /> to get the error code.</returns>
         public int ChannelSetSync(IBassAudioChannel channel, SyncFlags type, long parameter, SyncProcedure procedure, IntPtr user = 0)
-            => BassMix.ChannelSetSync(channel.Handle, type, parameter, procedure, user);
+            // Offline mixers are pulled directly, with no playback buffer to delay callbacks against.
+            // Delayed end/stop syncs can crash BASSmix when a source finishes in this graph.
+            => BassMix.ChannelSetSync(channel.Handle, offline ? type | SyncFlags.Mixtime : type, parameter, procedure, user);
 
         /// <summary>
         /// Removes a synchroniser from a mixer source channel.
@@ -292,6 +294,7 @@ namespace osu.Framework.Audio.Mixing.Bass
         private void createMixer()
         {
             removeCapture();
+
             if (Handle != 0)
             {
                 ManagedBass.Bass.StreamFree(Handle);
@@ -306,9 +309,9 @@ namespace osu.Framework.Audio.Mixing.Bass
             Handle = offline
                 ? BassMix.CreateMixerStream(48000, 2, BassFlags.MixerNonStop | BassFlags.Decode | BassFlags.Float)
                 : manager?.GlobalMixerHandle.Value != null
-                // The decode flag here is super important to maintain the lowest latency audio output.
-                ? BassMix.CreateMixerStream(frequency, 2, BassFlags.MixerNonStop | BassFlags.Decode | BassFlags.Float)
-                : BassMix.CreateMixerStream(frequency, 2, BassFlags.MixerNonStop | BassFlags.Float);
+                    // The decode flag here is super important to maintain the lowest latency audio output.
+                    ? BassMix.CreateMixerStream(frequency, 2, BassFlags.MixerNonStop | BassFlags.Decode | BassFlags.Float)
+                    : BassMix.CreateMixerStream(frequency, 2, BassFlags.MixerNonStop | BassFlags.Float);
 
             if (Handle == 0)
                 return;
