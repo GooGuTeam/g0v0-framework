@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
@@ -313,9 +313,12 @@ namespace osu.Framework.Tests.Audio
 
             Assert.IsTrue(track.IsRunning);
 
-            takeEffectsAndUpdateAfter(50);
-
-            Assert.IsFalse(track.IsRunning);
+            // BASS processes playback and completion callbacks asynchronously, including after a device change.
+            Assert.That(() =>
+            {
+                bass.Update();
+                return track.IsRunning;
+            }, Is.False.After(3000).PollEvery(10));
             Assert.IsTrue(track.HasCompleted);
         }
 

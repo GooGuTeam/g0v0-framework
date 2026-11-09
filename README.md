@@ -71,6 +71,16 @@ Four isolated waveform captures (palette, opacity, resize and scroll changes) ma
 `DeferredStorageBufferGpuTest.TestMasksMatchImmediateAcrossBuffersAndFrames` compares GPU output against the immediate renderer
 across 4,225 masks, multiple storage buffers and sparse changes over three frames; run this explicit test on Windows with Direct3D 11.
 
+### Audio completion tests
+
+`TrackBassTest.TestHasCompletedFiresAfterDeviceChange` polls framework updates for up to three seconds after a device change,
+because BASS playback and completion callbacks run asynchronously. It still requires playback to stop and `HasCompleted` to be set;
+it does not assume that a fixed 50 ms sleep is sufficient on every CI runner.
+
+```sh
+OSU_EXECUTION_MODE=SingleThread dotnet test osu.Framework.Tests/osu.Framework.Tests.csproj -c Debug --filter FullyQualifiedName~osu.Framework.Tests.Audio.TrackBassTest
+```
+
 ## Contributing
 
 Contributions can be made via pull requests to this repository.
