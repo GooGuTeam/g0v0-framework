@@ -79,7 +79,7 @@ namespace osu.Framework.Graphics.Rendering.Deferred
             if (count == 0)
                 return 0;
 
-            renderer.DrawBatchVertices(topology, 0, count);
+            renderer.DrawBatchVertices(topology, 0, count, typeof(TVertex) == typeof(TexturedVertex2D));
             renderer.Context.EnqueueEvent(FlushEvent.Create(renderer, this, count));
             return count;
         }
