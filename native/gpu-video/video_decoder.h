@@ -11,7 +11,7 @@
 // read through a positional callback, and frames are returned as I420 planes, the layout video textures expect.
 // With hardware decoding, the decoder and video processor run on a private D3D11 device (DXVA) and each frame is
 // read back from its texture; Media Foundation falls back to its software decoders when the GPU lacks the codec.
-// With shared output (experimental), frames never reach the CPU: a compute shader splits each NV12 frame into Y, U and V
+// With shared output, frames never reach the CPU: a compute shader splits each NV12 frame into Y, U and V
 // planes in a shared texture (see SharedFrame), which the renderer's device copies from (video_share.h).
 
 // Exported by mfplat (Windows 7 and later) but missing from the MinGW headers.
@@ -105,7 +105,9 @@ struct ShareSlot {
     IDXGIKeyedMutex *mutex = nullptr;
     HANDLE handle = nullptr;
     bool busy = false;          // Handed out and not yet released by the consumer.
-    void free() { if (handle) CloseHandle(handle); handle = nullptr; release(mutex); release(texture); busy = false; }
+    bool broken = false;        // Could not be taken back from the consumer; never handed out again.
+    int generation = 0, index = 0;
+    void free() { if (handle) CloseHandle(handle); handle = nullptr; release(mutex); release(texture); busy = broken = false; }
 };
 
 struct VideoShare {
@@ -120,7 +122,7 @@ struct VideoShare {
     UINT sourceWidth = 0, sourceHeight = 0;
     int width = 0, height = 0, generation = 0, next = 0;
     ShareSlot slots[share_slot_count];
-    // Slots of earlier sizes, kept until the decoder closes because frames already handed out may not have been opened yet.
+    // Slots of earlier sizes still handed out, which the consumer may not have opened yet. Each is freed when it is released.
     std::vector<ShareSlot> retired;
     std::mutex gate;                            // Slot state, shared by the decoding thread and releases from the renderer.
     void freeTextures() {
@@ -304,10 +306,14 @@ API HRESULT g0_vdec_open(DecoderReadCallback read, void *context, LONGLONG lengt
     CHECK(MFCreateAttributes(&attributes, 3));
     // Converts decoders' other YUV outputs to NV12 (on the GPU with a device); most decoders produce NV12 already.
     CHECK(attributes->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE));
-    if (SUCCEEDED(hr) && (hardware || share) && SUCCEEDED(create_decoding_device(d, adapter))) {
-        CHECK(attributes->SetUnknown(MF_SOURCE_READER_D3D_MANAGER, d->manager));
-        CHECK(attributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE));
-        if (SUCCEEDED(hr) && share && FAILED(create_share(d))) fprintf(stderr, "Shared video output is unavailable\n");
+    if (SUCCEEDED(hr) && (hardware || share)) {
+        // Shared output needs the renderer's adapter; without it, DXVA still works on the default one.
+        bool onAdapter = SUCCEEDED(create_decoding_device(d, adapter));
+        if (onAdapter || (adapter && SUCCEEDED(create_decoding_device(d, nullptr)))) {
+            CHECK(attributes->SetUnknown(MF_SOURCE_READER_D3D_MANAGER, d->manager));
+            CHECK(attributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE));
+            if (SUCCEEDED(hr) && share && (!onAdapter || FAILED(create_share(d)))) fprintf(stderr, "Shared video output is unavailable\n");
+        }
     }
     if (SUCCEEDED(hr)) hr = MFCreateSourceReaderFromByteStream(bytes, attributes, &d->reader);
     CHECK(d->reader->SetStreamSelection((DWORD)MF_SOURCE_READER_ALL_STREAMS, FALSE));
@@ -346,6 +352,8 @@ API HRESULT g0_vdec_read(VideoDecoding *d, BYTE *y, BYTE *u, BYTE *v, int capaci
     if (!d || !y || !u || !v || !time || !info) return E_INVALIDARG;
     ComScope com;
     if (FAILED(com.Status())) return com.Status();
+    // A frame kept back by g0_vdec_read_shared, when the caller has switched from shared output to reading back.
+    release(d->pending);
     while (true) {
         DWORD flags = 0;
         LONGLONG timestamp = 0;
@@ -455,11 +463,16 @@ static HRESULT ensure_share_textures(VideoDecoding *d) {
     {
         std::lock_guard<std::mutex> lock(s->gate);
         for (auto &slot : s->slots) {
-            if (slot.texture || slot.handle) s->retired.push_back(slot);
+            if (slot.busy && !slot.broken) s->retired.push_back(slot);
+            else slot.free();
             slot = ShareSlot();
         }
         s->generation++;
         s->next = 0;
+        for (int i = 0; i < share_slot_count; i++) {
+            s->slots[i].generation = s->generation;
+            s->slots[i].index = i;
+        }
     }
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
     desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE | D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
@@ -576,10 +589,16 @@ API HRESULT g0_vdec_read_shared(VideoDecoding *d, SharedFrame *frame, LONGLONG *
         }
     }
     if (SUCCEEDED(hr) && index < 0) {
+        bool usable = false;
+        {
+            std::lock_guard<std::mutex> lock(s->gate);
+            for (auto &slot : s->slots) usable |= !slot.broken;
+        }
         s->threading->Leave();
         d->pending = sample;
         d->pendingTime = *time;
-        return share_busy;
+        // With every slot lost to failed releases, waiting would never end; the caller can read frames back instead.
+        return usable ? share_busy : HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
     }
     CHECK(upload_sample(d, sample));
     sample->Release();
@@ -621,20 +640,48 @@ API HRESULT g0_vdec_read_shared(VideoDecoding *d, SharedFrame *frame, LONGLONG *
 }
 
 // Returns a slot handed out by g0_vdec_read_shared. `consumed` tells whether the consumer acquired and released it;
-// otherwise the decoder takes it back from key 1 itself. Slots of an earlier generation are ignored.
+// otherwise the decoder takes it back from key 1 itself. A slot that cannot be taken back is never handed out again.
+// Slots of an earlier generation are freed instead.
 API HRESULT g0_vdec_release_shared(VideoDecoding *d, int generation, int slot, int consumed) {
     if (!d || !d->share || slot < 0 || slot >= share_slot_count) return E_INVALIDARG;
     VideoShare *s = d->share;
-    std::lock_guard<std::mutex> lock(s->gate);
-    ShareSlot &target = s->slots[slot];
-    if (generation != s->generation || !target.busy) return S_OK;
-    HRESULT hr = S_OK;
-    if (!consumed) {
-        hr = target.mutex->AcquireSync(1, 1000);
-        if (hr == S_OK) hr = target.mutex->ReleaseSync(0);
-        else hr = FAILED(hr) ? hr : HRESULT_FROM_WIN32(WAIT_TIMEOUT);
+    std::unique_lock<std::mutex> lock(s->gate);
+    if (generation != s->generation) {
+        for (size_t i = 0; i < s->retired.size(); i++) {
+            if (s->retired[i].generation != generation || s->retired[i].index != slot) continue;
+            s->retired[i].free();
+            s->retired.erase(s->retired.begin() + (ptrdiff_t)i);
+            break;
+        }
+        return S_OK;
     }
-    target.busy = false;
+    ShareSlot &target = s->slots[slot];
+    if (!target.busy || target.broken) return S_OK;
+    if (consumed) {
+        target.busy = false;
+        return S_OK;
+    }
+    // Wait without the gate, which the decoding thread needs to find free slots. The slot stays busy meanwhile.
+    IDXGIKeyedMutex *mutex = target.mutex;
+    mutex->AddRef();
+    lock.unlock();
+    HRESULT hr = mutex->AcquireSync(1, 1000);
+    if (hr == S_OK) hr = mutex->ReleaseSync(0);
+    else if (SUCCEEDED(hr)) hr = HRESULT_FROM_WIN32(WAIT_TIMEOUT);
+    lock.lock();
+    if (generation == s->generation && s->slots[slot].mutex == mutex) {
+        if (SUCCEEDED(hr)) s->slots[slot].busy = false;
+        else s->slots[slot].broken = true;
+    } else {
+        // The frame size changed meanwhile and the slot was retired; it is no longer needed either way.
+        for (size_t i = 0; i < s->retired.size(); i++) {
+            if (s->retired[i].mutex != mutex) continue;
+            s->retired[i].free();
+            s->retired.erase(s->retired.begin() + (ptrdiff_t)i);
+            break;
+        }
+    }
+    mutex->Release();
     return hr;
 }
 

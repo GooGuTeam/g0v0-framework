@@ -2,7 +2,7 @@
 // See the LICENCE file in the repository root for full licence text.
 #pragma once
 
-// The renderer's side of shared video output (experimental): each slot texture from g0_vdec_read_shared is opened once on
+// The renderer's side of shared video output: each slot texture from g0_vdec_read_shared is opened once on
 // the renderer's device, then every frame copies its Y, U and V planes into the renderer's own video textures on the GPU.
 // The keyed mutex orders this against the decoder: the copy acquires key 1 and releases key 0.
 

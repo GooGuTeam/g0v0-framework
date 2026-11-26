@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using osu.Framework.Graphics.Primitives;
@@ -16,7 +17,7 @@ using Texture = Veldrid.Texture;
 namespace osu.Framework.Graphics.Video
 {
     /// <summary>
-    /// The renderer's side of experimental zero-copy video decoding (<see cref="Configuration.FrameworkSetting.ZeroCopyVideoDecoding"/>):
+    /// The renderer's side of zero-copy video decoding (<see cref="Configuration.FrameworkSetting.ZeroCopyVideoDecoding"/>):
     /// opens the decoder's shared slot textures on the Direct3D 11 or Vulkan device and copies each frame into a video texture on the GPU.
     /// </summary>
     internal sealed class MediaFoundationSharedVideo : IDisposable
@@ -28,6 +29,7 @@ namespace osu.Framework.Graphics.Video
         private readonly bool vulkan;
         private readonly Dictionary<(int generation, int slot), IntPtr> consumers = new Dictionary<(int, int), IntPtr>();
         private readonly Lock sync = new Lock();
+        private int latestGeneration;
         private bool disposed;
 
         private MediaFoundationSharedVideo(IVeldridRenderer renderer, bool vulkan)
@@ -78,6 +80,17 @@ namespace osu.Framework.Graphics.Video
                 if (disposed)
                     return false;
 
+                // Slots of an earlier frame size: a frame left over from before the size changed is not worth showing,
+                // and the consumers of those slots are closed once the first frame of the new size arrives.
+                if (frame.Generation < latestGeneration)
+                    return false;
+
+                if (frame.Generation > latestGeneration)
+                {
+                    closeConsumers(frame.Generation);
+                    latestGeneration = frame.Generation;
+                }
+
                 if (!consumers.TryGetValue((frame.Generation, frame.Slot), out IntPtr consumer))
                 {
                     var device = renderer.Device;
@@ -126,16 +139,23 @@ namespace osu.Framework.Graphics.Video
                     return;
 
                 disposed = true;
+                closeConsumers(int.MaxValue);
+            }
+        }
 
-                foreach (IntPtr consumer in consumers.Values)
-                {
-                    if (vulkan)
-                        g0_vshare_vk_close(consumer);
-                    else
-                        g0_vshare_d3d11_close(consumer);
-                }
+        /// <summary>
+        /// Closes the consumers of slots older than <paramref name="generation"/>.
+        /// </summary>
+        private void closeConsumers(int generation)
+        {
+            foreach (var (key, consumer) in consumers.Where(c => c.Key.generation < generation).ToArray())
+            {
+                if (vulkan)
+                    g0_vshare_vk_close(consumer);
+                else
+                    g0_vshare_d3d11_close(consumer);
 
-                consumers.Clear();
+                consumers.Remove(key);
             }
         }
 

@@ -71,6 +71,8 @@ jobs:
 
   test:
     name: Test
+    # Windows tests use the native recording libraries (g0v0.Audio.dll for the WASAPI bridge tests).
+    needs: native
     runs-on: ${{matrix.os.fullname}}
     env:
       OSU_EXECUTION_MODE: ${{matrix.threadingMode}}
@@ -110,6 +112,14 @@ jobs:
       - name: Run httpbin
         run: $HOME/go/bin/go-httpbin &
         shell: bash
+
+      # RecordingNative.targets copies these into the test output when they are present.
+      - name: Download native recording libraries
+        if: runner.os == 'Windows'
+        uses: actions/download-artifact@v5
+        with:
+          name: recording-native-win-x64
+          path: native/artifacts/win-x64
 
       - name: Compile
         run: dotnet build -c ${{matrix.os.configuration}} -warnaserror osu-framework.Desktop.slnf

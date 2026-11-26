@@ -24,7 +24,7 @@ namespace osu.Framework.Configuration
 
         public static bool UseMediaFoundationVideoDecoder { get; private set; } = true;
 
-        public static bool ZeroCopyVideoDecoding { get; private set; }
+        public static bool ZeroCopyVideoDecoding { get; private set; } = true;
 
         public static bool OfflineVulkanRenderer { get; private set; }
 

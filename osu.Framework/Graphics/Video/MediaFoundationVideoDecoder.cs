@@ -25,7 +25,7 @@ namespace osu.Framework.Graphics.Video
     /// <remarks>
     /// Unless <see cref="VideoDecoder.TargetHardwareVideoDecoders"/> is <see cref="HardwareVideoDecoder.None"/>, decoding uses DXVA on a
     /// private D3D11 device (Media Foundation still decodes codecs the GPU lacks in software). Frames are read back and converted
-    /// from NV12 to the I420 planes video textures expect. With <see cref="FrameworkSetting.ZeroCopyVideoDecoding"/> (experimental) on a
+    /// from NV12 to the I420 planes video textures expect. With <see cref="FrameworkSetting.ZeroCopyVideoDecoding"/> (on by default) on a
     /// Direct3D 11 or Vulkan renderer, frames stay on the GPU instead (see <see cref="MediaFoundationSharedVideo"/>).
     /// Disabling the UseMediaFoundationVideoDecoder framework setting uses FFmpeg instead, which Windows x64 builds only ship
     /// with <c>-p:G0V0KeepWindowsFfmpeg=true</c>.
@@ -64,10 +64,13 @@ namespace osu.Framework.Graphics.Video
         // Zero-copy output, and the lock that keeps slot releases from the draw thread away from closing the native decoder.
         private MediaFoundationSharedVideo? shared;
 
+        // Set once the renderer could not take a shared frame; decoding then reads frames back for the rest of the video.
+        private volatile bool sharedFailed;
+
         /// <summary>
         /// Whether frames stay on the GPU (zero-copy decoding); known once decoding has started.
         /// </summary>
-        internal bool UsesSharedFrames => shared != null;
+        internal bool UsesSharedFrames => shared != null && !sharedFailed;
 
         private readonly Lock sharedLock = new Lock();
         private volatile DecoderState state = DecoderState.Ready;
@@ -250,7 +253,7 @@ namespace osu.Framework.Graphics.Video
 
         private void decodeNextFrame()
         {
-            if (shared != null)
+            if (UsesSharedFrames)
             {
                 decodeNextSharedFrame();
                 return;
@@ -341,9 +344,10 @@ namespace osu.Framework.Graphics.Video
                         state = DecoderState.EndOfStream;
                     return;
 
-                default:
-                    Marshal.ThrowExceptionForHR(result);
-                    break;
+                case < 0:
+                    // Reading back reports the error again if it is not specific to shared output.
+                    giveUpSharedFrames($"0x{result:X8}");
+                    return;
             }
 
             state = DecoderState.Running;
@@ -384,15 +388,30 @@ namespace osu.Framework.Graphics.Video
         internal bool CopySharedFrame(MediaFoundationSharedVideo.SharedFrame frame, int width, int height, global::Veldrid.Texture y, global::Veldrid.Texture u,
                                       global::Veldrid.Texture v)
         {
+            if (sharedFailed)
+                return false;
+
             try
             {
                 return shared?.Copy(frame, width, height, y, u, v) ?? false;
             }
             catch (Exception e)
             {
-                Logger.Error(e, "Could not copy a shared video frame");
+                giveUpSharedFrames(e.Message);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Switches to reading frames back after zero-copy decoding failed. Frames already handed out are dropped as they are uploaded.
+        /// </summary>
+        private void giveUpSharedFrames(string reason)
+        {
+            if (sharedFailed)
+                return;
+
+            sharedFailed = true;
+            Logger.Log($"Zero-copy video decoding failed ({reason}); reading frames back instead");
         }
 
         /// <summary>

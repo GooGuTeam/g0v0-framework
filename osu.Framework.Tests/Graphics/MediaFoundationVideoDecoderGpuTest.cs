@@ -5,6 +5,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 using NUnit.Framework;
@@ -30,8 +31,11 @@ namespace osu.Framework.Tests.Graphics
 
         private static readonly HardwareVideoDecoder[] modes = { HardwareVideoDecoder.None, HardwareVideoDecoder.Any };
 
+        private static readonly PropertyInfo zero_copy_flag = typeof(FrameworkFeatureFlags).GetProperty(nameof(FrameworkFeatureFlags.ZeroCopyVideoDecoding))!;
+
         private VeldridRenderer renderer = null!;
         private bool wasDrawThread;
+        private bool wasZeroCopy;
 
         [SetUp]
         public void SetUp()
@@ -41,6 +45,11 @@ namespace osu.Framework.Tests.Graphics
 
             wasDrawThread = ThreadSafety.IsDrawThread;
             ThreadSafety.IsDrawThread = true;
+
+            // Zero-copy decoding is on by default; tests other than the zero-copy ones cover reading frames back.
+            wasZeroCopy = FrameworkFeatureFlags.ZeroCopyVideoDecoding;
+            zero_copy_flag.SetValue(null, false);
+
             renderer = new VeldridRenderer();
             renderer.InitialiseOffline(64, 64);
         }
@@ -51,6 +60,7 @@ namespace osu.Framework.Tests.Graphics
             if (renderer.IsInitialised)
                 renderer.DisposeOffline();
             ThreadSafety.IsDrawThread = wasDrawThread;
+            zero_copy_flag.SetValue(null, wasZeroCopy);
         }
 
         [Test]
@@ -121,26 +131,46 @@ namespace osu.Framework.Tests.Graphics
                 Assert.That(readback.UsesSharedFrames, Is.False);
             }
 
-            var zeroCopyFlag = typeof(FrameworkFeatureFlags).GetProperty(nameof(FrameworkFeatureFlags.ZeroCopyVideoDecoding))!;
-            zeroCopyFlag.SetValue(null, true);
+            zero_copy_flag.SetValue(null, true);
 
             double sharedTime;
             byte[][] sharedPlanes;
 
-            try
+            using (var zeroCopy = createDecoder(name, HardwareVideoDecoder.Any))
             {
-                using var zeroCopy = createDecoder(name, HardwareVideoDecoder.Any);
                 (sharedTime, sharedPlanes) = decodeFirstFrame(zeroCopy);
                 Assert.That(zeroCopy.UsesSharedFrames, Is.True, "zero-copy decoding in use");
-            }
-            finally
-            {
-                zeroCopyFlag.SetValue(null, false);
             }
 
             TestContext.Progress.WriteLine($"{name} ({renderer.Device.BackendType}): {describeDifference(sharedPlanes, readbackPlanes)}");
             Assert.That(sharedTime, Is.EqualTo(readbackTime));
             Assert.That(sharedPlanes, Is.EqualTo(readbackPlanes));
+        }
+
+        /// <summary>
+        /// When the renderer cannot take shared frames, decoding carries on by reading frames back instead of stopping.
+        /// </summary>
+        [Test]
+        [Explicit("Requires an offline graphics device, GPU readback and the native GPU video library.")]
+        public void TestZeroCopyFailureFallsBackToReadback([Values(false, true)] bool vulkan)
+        {
+            if (vulkan)
+                useVulkanRenderer();
+
+            zero_copy_flag.SetValue(null, true);
+
+            using var decoder = createDecoder("h264.mp4", HardwareVideoDecoder.Any);
+            decodeFirstFrame(decoder);
+            Assert.That(decoder.UsesSharedFrames, Is.True, "zero-copy decoding in use");
+
+            typeof(MediaFoundationVideoDecoder).GetMethod("giveUpSharedFrames", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(decoder, new object[] { "test" });
+            Assert.That(decoder.UsesSharedFrames, Is.False);
+
+            // Up to seven shared frames (queued frames, slots and a kept-back one) can predate the switch; they are dropped on upload.
+            int skipped = 0;
+            var frame = waitForFrame(decoder, _ => ++skipped > 8);
+            Assert.That(readPlanes(frame)[0].Any(b => b != 0), Is.True, "read-back frame has data");
+            Assert.That(decoder.IsFaulted, Is.False);
         }
 
         private void useVulkanRenderer()
