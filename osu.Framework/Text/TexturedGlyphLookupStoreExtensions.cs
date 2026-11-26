@@ -13,6 +13,12 @@ namespace osu.Framework.Text
             => store is FontStore fonts ? fonts.GetForSize(fontName, character, fontSize) : store.Get(fontName, character);
 
         /// <summary>
+        /// Whether the store will shape text, so that the work of splitting a line into runs can be skipped when it
+        /// will not.
+        /// </summary>
+        internal static bool SupportsShaping(this ITexturedGlyphLookupStore store) => store is FontStore { ShapingMode: TextShapingMode.HarfBuzz };
+
+        /// <summary>
         /// Shapes a run of text, if the store is able to.
         /// </summary>
         /// <param name="store">The store to shape with.</param>

@@ -130,7 +130,7 @@ namespace osu.Framework.Text
         private bool tryAddShapedText(string text)
         {
             // Fixed-width text is laid out on a grid, where shaping cannot change where a glyph ends up.
-            if (font.FixedWidth || string.IsNullOrEmpty(text) || !CanAddCharacters)
+            if (font.FixedWidth || string.IsNullOrEmpty(text) || !CanAddCharacters || !store.SupportsShaping())
                 return false;
 
             var runs = BidirectionalText.GetRuns(text);
