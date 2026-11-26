@@ -12,6 +12,7 @@ using osu.Framework.Extensions;
 using osu.Framework.Graphics.Video;
 using osu.Framework.Input;
 using osu.Framework.Platform;
+using osu.Framework.Text;
 using osuTK;
 
 namespace osu.Framework.Configuration
@@ -46,6 +47,7 @@ namespace osu.Framework.Configuration
             SetDefault(FrameworkSetting.FontAtlasPacking, Graphics.Textures.AtlasPackingStrategy.Etagere);
             SetDefault(FrameworkSetting.TextureAtlasPacking, Graphics.Textures.AtlasPackingStrategy.Guillotiere);
             SetDefault(FrameworkSetting.LowResolutionFonts, false);
+            SetDefault(FrameworkSetting.TextShapingMode, TextShapingMode.Legacy);
             // Single-channel glyph atlases use a quarter of the memory and upload bandwidth of RGBA ones.
             SetDefault(FrameworkSetting.SingleChannelFontAtlas, true);
             SetDefault(FrameworkSetting.SingleChannelFontAtlasDefaulted, false);
@@ -194,6 +196,7 @@ namespace osu.Framework.Configuration
         ProbeBindlessTextures,
         ClearGraphicsProbeCache,
         LowResolutionFonts,
+        TextShapingMode,
         SingleChannelFontAtlas,
         ShowOverdrawIndicator,
         PerVertexMasking,

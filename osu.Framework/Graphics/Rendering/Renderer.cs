@@ -21,6 +21,7 @@ using osu.Framework.IO.Stores;
 using osu.Framework.Lists;
 using osu.Framework.Platform;
 using osu.Framework.Statistics;
+using osu.Framework.Text;
 using osu.Framework.Threading;
 using osu.Framework.Timing;
 using osuTK;
@@ -66,6 +67,11 @@ namespace osu.Framework.Graphics.Rendering
         internal bool LowResolutionFonts { get; set; }
         internal bool SingleChannelFontAtlas { get; set; }
         internal bool ShowOverdrawIndicator { get; set; }
+
+        /// <summary>
+        /// How text is shaped before glyphs are drawn.
+        /// </summary>
+        internal TextShapingMode ShapingMode { get; set; } = TextShapingMode.Legacy;
 
         private readonly FrameDrawCapture? drawCapture = FrameDrawCapture.Create();
         internal GraphicsProbeCache? GraphicsProbeCache { get; set; }

@@ -4,6 +4,7 @@
 using osu.Framework.Graphics.Rendering;
 using osu.Framework.Graphics.Shaders;
 using osu.Framework.Graphics.Textures;
+using osu.Framework.Text;
 
 namespace osu.Framework.Configuration
 {
@@ -28,6 +29,11 @@ namespace osu.Framework.Configuration
 
         public static bool OfflineVulkanRenderer { get; private set; }
 
+        /// <summary>
+        /// How text is shaped. Saved settings take effect on the next host run.
+        /// </summary>
+        public static TextShapingMode TextShaping { get; private set; } = TextShapingMode.Legacy;
+
         private static AtlasPackingStrategy fontAtlasPacking = AtlasPackingStrategy.Etagere;
         private static AtlasPackingStrategy textureAtlasPacking = AtlasPackingStrategy.Guillotiere;
         private static bool lowResolutionFonts;
@@ -45,6 +51,7 @@ namespace osu.Framework.Configuration
             UseMediaFoundationVideoDecoder = config.Get<bool>(FrameworkSetting.UseMediaFoundationVideoDecoder);
             ZeroCopyVideoDecoding = config.Get<bool>(FrameworkSetting.ZeroCopyVideoDecoding);
             OfflineVulkanRenderer = config.Get<bool>(FrameworkSetting.OfflineVulkanRenderer);
+            TextShaping = config.Get<TextShapingMode>(FrameworkSetting.TextShapingMode);
             PerVertexMasking.Enabled = config.Get<bool>(FrameworkSetting.PerVertexMasking);
             Renderer.TextureSlotsEnabled = config.Get<bool>(FrameworkSetting.TextureSlots);
             TextureStore.ShareAtlases = config.Get<bool>(FrameworkSetting.SharedTextureAtlases);
@@ -64,6 +71,7 @@ namespace osu.Framework.Configuration
             renderer.SingleChannelFontAtlas = singleChannelFontAtlas;
             renderer.ShowOverdrawIndicator = showOverdrawIndicator;
             renderer.ProbeBindlessTextures = probeBindlessTextures;
+            renderer.ShapingMode = TextShaping;
         }
     }
 }

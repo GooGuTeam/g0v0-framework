@@ -30,6 +30,14 @@ namespace osu.Framework.IO.Stores
         private Storage cacheStorage;
         private readonly bool lowResolutionFonts;
 
+        /// <summary>
+        /// How text run through this store is shaped before glyphs are fetched.
+        /// </summary>
+        /// <remarks>
+        /// Recorded here so that the shaping path can be selected once per font stack rather than per glyph lookup.
+        /// </remarks>
+        internal TextShapingMode ShapingMode { get; }
+
         public TexturePixelFormat AtlasTextureFormat => Atlas?.TextureFormat ?? TexturePixelFormat.R8G8B8A8Float;
 
         /// <summary>
@@ -71,6 +79,7 @@ namespace osu.Framework.IO.Stores
         {
             this.cacheStorage = cacheStorage;
             lowResolutionFonts = (renderer as Renderer)?.LowResolutionFonts ?? false;
+            ShapingMode = (renderer as Renderer)?.ShapingMode ?? TextShapingMode.Legacy;
 
             if (useAtlas)
             {
