@@ -53,23 +53,17 @@ namespace osu.Framework.Tests.Audio
         }
 
         [Test]
-        public void TestMixerHandlePublishAndReset()
+        public void TestManagedCallbackWithoutNativeLibrary()
         {
             if (RuntimeInfo.OS != RuntimeInfo.Platform.Windows)
                 return;
 
-            // The context is read as the inlined thunk's mixer handle, so skip the native capture library (g0v0.Audio.dll).
             Environment.SetEnvironmentVariable(capture_library_variable, Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "missing.dll"));
 
-            Assert.IsTrue(WasapiNativeBridge.TryGetNativeProcedure(out _, out IntPtr context));
-            Assert.AreEqual(0, Marshal.ReadInt32(context));
-
-            const int test_handle = 0x12345678;
-            WasapiNativeBridge.SetMixerHandle(test_handle);
-            Assert.AreEqual(test_handle, Marshal.ReadInt32(context));
-
-            WasapiNativeBridge.Reset();
-            Assert.AreEqual(0, Marshal.ReadInt32(context));
+            Assert.IsFalse(WasapiNativeBridge.TryGetNativeProcedure(out IntPtr proc, out IntPtr context));
+            Assert.AreEqual(IntPtr.Zero, proc);
+            Assert.AreEqual(IntPtr.Zero, context);
+            Assert.IsFalse(WasapiNativeBridge.IsNativeActive);
         }
 
         [Test]
