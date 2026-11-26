@@ -19,14 +19,14 @@ namespace osu.Framework.Text
         /// <param name="fontName">The font to shape with, matched like <see cref="ITexturedGlyphLookupStore.Get"/>.</param>
         /// <param name="text">The text to shape.</param>
         /// <param name="fontSize">The size the text will be drawn at, which selects the glyph texture resolution.</param>
-        /// <param name="glyphs">The shaped glyphs, one per shaped output glyph.</param>
+        /// <param name="glyphs">The shaped glyphs, one per shaped output glyph, each with the characters it covers.</param>
         /// <returns><see langword="false"/> if the store cannot shape this run.</returns>
-        internal static bool TryShape(this ITexturedGlyphLookupStore store, string? fontName, string text, float fontSize, out IReadOnlyList<ITexturedCharacterGlyph> glyphs)
+        internal static bool TryShape(this ITexturedGlyphLookupStore store, string? fontName, string text, float fontSize, out IReadOnlyList<ShapedCharacterGlyph> glyphs)
         {
             if (store is FontStore fonts)
                 return fonts.TryShape(fontName, text, fontSize, out glyphs);
 
-            glyphs = Array.Empty<ITexturedCharacterGlyph>();
+            glyphs = Array.Empty<ShapedCharacterGlyph>();
             return false;
         }
     }

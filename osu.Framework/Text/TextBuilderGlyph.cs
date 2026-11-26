@@ -70,11 +70,26 @@ namespace osu.Framework.Text
         /// </summary>
         public bool OnNewLine { get; internal set; }
 
+        /// <summary>
+        /// The index of the first character of the cluster this glyph was shaped from.
+        /// </summary>
+        /// <remarks>
+        /// Zero for a glyph that came from a per-character lookup, which is also why <see cref="ClusterLength"/>
+        /// has to be checked before treating two glyphs as belonging together.
+        /// </remarks>
+        internal readonly int ClusterStart;
+
+        /// <summary>
+        /// The number of characters in the cluster this glyph was shaped from, or zero for a glyph that came from a
+        /// per-character lookup and therefore represents exactly one character.
+        /// </summary>
+        internal readonly int ClusterLength;
+
         private readonly float textSize;
         private readonly float? fixedWidth;
         private readonly bool useFontSizeAsHeight;
 
-        internal TextBuilderGlyph(ITexturedCharacterGlyph glyph, float textSize, float? fixedWidth = null, bool useFontSizeAsHeight = true)
+        internal TextBuilderGlyph(ITexturedCharacterGlyph glyph, float textSize, float? fixedWidth = null, bool useFontSizeAsHeight = true, int clusterStart = 0, int clusterLength = 0)
         {
             this = default;
             this.textSize = textSize;
@@ -82,6 +97,8 @@ namespace osu.Framework.Text
             this.useFontSizeAsHeight = useFontSizeAsHeight;
 
             Glyph = glyph;
+            ClusterStart = clusterStart;
+            ClusterLength = clusterLength;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

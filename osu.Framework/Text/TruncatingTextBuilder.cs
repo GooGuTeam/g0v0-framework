@@ -58,6 +58,108 @@ namespace osu.Framework.Text
             IsTruncated = false;
         }
 
+        public override void AddText(string text)
+        {
+            if (tryAddShapedTruncated(text))
+                return;
+
+            base.AddText(text);
+        }
+
+        /// <summary>
+        /// Adds as much of <paramref name="text"/> as fits, cutting at a cluster boundary.
+        /// </summary>
+        /// <returns>Whether the text was added, in which case nothing further must be added for it.</returns>
+        /// <remarks>
+        /// Where the text is cut is decided before any of it is laid out, and the surviving prefix is then shaped on
+        /// its own. Cutting glyph by glyph would keep the last character in the form it took while the cut-away text
+        /// still followed it, and would drop a whole ligature when only part of it overflowed the available width.
+        /// </remarks>
+        private bool tryAddShapedTruncated(string text)
+        {
+            if (addingEllipsis || font.FixedWidth || string.IsNullOrEmpty(text))
+                return false;
+
+            if (!TryShapeText(text, out var glyphs))
+                return false;
+
+            // Truncation keeps the start of the text and drops the end, which is only where the run ends when the
+            // glyphs are laid out left to right. A run of another direction falls back to per-glyph truncation.
+            if (glyphs.Count == 0 || glyphs[0].ClusterStart != 0)
+                return false;
+
+            if (HasAvailableSpace(MeasureShapedRun(glyphs, glyphs.Count)))
+            {
+                AddShapedGlyphs(glyphs);
+                return true;
+            }
+
+            bool hasEllipsis = !string.IsNullOrEmpty(ellipsisString);
+            int cut = findCut(glyphs, hasEllipsis ? measureEllipsis() + spacing.X : 0);
+
+            // Trailing whitespace would push the ellipsis away from the text it is meant to follow.
+            while (cut > 0 && char.IsWhiteSpace(text[cut - 1]))
+                cut--;
+
+            IReadOnlyList<ShapedCharacterGlyph>? prefix = null;
+
+            if (cut > 0 && !TryShapeText(text.Substring(0, cut), out prefix))
+                return false;
+
+            addingEllipsis = true;
+
+            try
+            {
+                if (prefix != null)
+                    AddShapedGlyphs(prefix);
+
+                if (hasEllipsis)
+                    base.AddText(ellipsisString!);
+            }
+            finally
+            {
+                addingEllipsis = false;
+                IsTruncated = true;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// The width the ellipsis occupies when laid out as its own run.
+        /// </summary>
+        private float measureEllipsis()
+        {
+            var builder = new TextBuilder(store, font, float.MaxValue, useFontSizeAsHeight, Vector2.Zero, spacing, new List<TextBuilderGlyph>(), neverFixedWidthCharacters, fallbackCharacter);
+            builder.AddText(ellipsisString!);
+
+            return builder.Bounds.X;
+        }
+
+        /// <summary>
+        /// Finds the number of characters from the start of <paramref name="glyphs"/> that fit, leaving
+        /// <paramref name="reserved"/> free for whatever follows.
+        /// </summary>
+        private int findCut(IReadOnlyList<ShapedCharacterGlyph> glyphs, float reserved)
+        {
+            int cut = 0;
+
+            for (int i = 0; i < glyphs.Count; i++)
+            {
+                // Only cut between clusters: a base character without the marks shaped onto it, or half a ligature,
+                // is not something that can be drawn.
+                if (i + 1 < glyphs.Count && glyphs[i + 1].ClusterStart == glyphs[i].ClusterStart)
+                    continue;
+
+                if (!HasAvailableSpace(MeasureShapedRun(glyphs, i + 1) + reserved))
+                    break;
+
+                cut = glyphs[i].ClusterEnd;
+            }
+
+            return cut;
+        }
+
         protected override bool CanAddCharacters => (base.CanAddCharacters && !IsTruncated) || addingEllipsis;
 
         protected override bool HasAvailableSpace(float length) => base.HasAvailableSpace(length) || addingEllipsis;

@@ -225,9 +225,9 @@ namespace osu.Framework.IO.Stores
         /// substitute glyphs from another font.
         /// </remarks>
         /// <returns><see langword="false"/> when shaping is unavailable or the run could not be shaped.</returns>
-        internal bool TryShape(string fontName, string text, float fontSize, out IReadOnlyList<ITexturedCharacterGlyph> glyphs)
+        internal bool TryShape(string fontName, string text, float fontSize, out IReadOnlyList<ShapedCharacterGlyph> glyphs)
         {
-            glyphs = Array.Empty<ITexturedCharacterGlyph>();
+            glyphs = Array.Empty<ShapedCharacterGlyph>();
 
             if (ShapingMode != TextShapingMode.HarfBuzz || string.IsNullOrEmpty(text))
                 return false;
@@ -247,7 +247,7 @@ namespace osu.Framework.IO.Stores
                 if (baseline == null)
                     return false;
 
-                var result = new ITexturedCharacterGlyph[shaped.Count];
+                var result = new ShapedCharacterGlyph[shaped.Count];
 
                 for (int i = 0; i < shaped.Count; i++)
                 {
@@ -259,11 +259,13 @@ namespace osu.Framework.IO.Stores
                         return false;
 
                     // A null containing store means this glyph takes no kerning: shaping already applied it.
-                    result[i] = new TexturedCharacterGlyph(
+                    var textured = new TexturedCharacterGlyph(
                         new CharacterGlyph(glyph.Character, glyph.XOffset, glyph.YOffset, glyph.XAdvance, baseline.Value, null),
                         texture,
                         1 / ScaleAdjust,
                         shaper.GetTextureScale(tier));
+
+                    result[i] = new ShapedCharacterGlyph(textured, glyph.ClusterStart, glyph.ClusterLength);
                 }
 
                 glyphs = result;

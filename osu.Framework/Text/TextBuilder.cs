@@ -111,7 +111,7 @@ namespace osu.Framework.Text
         /// Appends text to this <see cref="TextBuilder"/>.
         /// </summary>
         /// <param name="text">The text to append.</param>
-        public void AddText(string text)
+        public virtual void AddText(string text)
         {
             if (tryAddShapedText(text))
                 return;
@@ -133,21 +133,60 @@ namespace osu.Framework.Text
             if (font.FixedWidth || string.IsNullOrEmpty(text) || !CanAddCharacters)
                 return false;
 
-            if (!store.TryShape(font.FontName, text, font.Size, out var glyphs)
-                && !store.TryShape(font.FontNameNoFamily, text, font.Size, out glyphs)
-                && !store.TryShape(string.Empty, text, font.Size, out glyphs))
+            if (!TryShapeText(text, out var glyphs))
                 return false;
 
+            AddShapedGlyphs(glyphs);
+            return true;
+        }
+
+        /// <summary>
+        /// Shapes <paramref name="text"/> with the font of this builder, if the store is able to.
+        /// </summary>
+        /// <param name="text">The text to shape.</param>
+        /// <param name="glyphs">The shaped glyphs, each with the characters it covers.</param>
+        /// <returns><see langword="false"/> if shaping is unavailable or the run could not be shaped.</returns>
+        private protected bool TryShapeText(string text, out IReadOnlyList<ShapedCharacterGlyph> glyphs)
+            => store.TryShape(font.FontName, text, font.Size, out glyphs)
+               || store.TryShape(font.FontNameNoFamily, text, font.Size, out glyphs)
+               || store.TryShape(string.Empty, text, font.Size, out glyphs);
+
+        /// <summary>
+        /// The width the first <paramref name="count"/> glyphs of a shaped run occupy when added at the current
+        /// position, including the spacing between them.
+        /// </summary>
+        private protected float MeasureShapedRun(IReadOnlyList<ShapedCharacterGlyph> glyphs, int count)
+        {
+            float width = 0;
+
+            for (int i = 0; i < count; i++)
+            {
+                if (i > 0 || !currentNewLine)
+                    width += spacing.X;
+
+                width += glyphs[i].Glyph.XAdvance * font.Size;
+            }
+
+            return width;
+        }
+
+        /// <summary>
+        /// Adds an already-shaped run at the current position.
+        /// </summary>
+        /// <remarks>
+        /// Stops early if <see cref="CanAddCharacters"/> turns false part-way through, leaving the run partially laid
+        /// out: subclasses that truncate decide where to stop before calling this.
+        /// </remarks>
+        private protected void AddShapedGlyphs(IReadOnlyList<ShapedCharacterGlyph> glyphs)
+        {
             foreach (var glyph in glyphs)
             {
                 if (!CanAddCharacters)
                     break;
 
-                if (!addGlyph(new TextBuilderGlyph(glyph, font.Size, useFontSizeAsHeight: useFontSizeAsHeight)))
+                if (!addGlyph(new TextBuilderGlyph(glyph.Glyph, font.Size, useFontSizeAsHeight: useFontSizeAsHeight, clusterStart: glyph.ClusterStart, clusterLength: glyph.ClusterLength)))
                     break;
             }
-
-            return true;
         }
 
         /// <summary>
@@ -264,7 +303,31 @@ namespace osu.Framework.Text
         /// Removes the last character added to this <see cref="TextBuilder"/>.
         /// If the character is the first character on a new line, the new line is also removed.
         /// </summary>
+        /// <remarks>
+        /// A shaped glyph is removed together with the rest of its cluster: part of a ligature or a base character
+        /// without the marks that were shaped onto it is not a glyph that can stand on its own.
+        /// </remarks>
         public void RemoveLastCharacter()
+        {
+            if (Characters.Count == 0)
+                return;
+
+            int clusterStart = Characters[^1].ClusterStart;
+            bool isClustered = Characters[^1].ClusterLength > 0;
+
+            removeLastGlyph();
+
+            if (!isClustered)
+                return;
+
+            while (Characters.Count > 0 && Characters[^1].ClusterLength > 0 && Characters[^1].ClusterStart == clusterStart)
+                removeLastGlyph();
+        }
+
+        /// <summary>
+        /// Removes the last glyph added to this <see cref="TextBuilder"/>, regardless of the cluster it belongs to.
+        /// </summary>
+        private void removeLastGlyph()
         {
             if (Characters.Count == 0)
                 return;

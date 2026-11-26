@@ -27,6 +27,21 @@ namespace osu.Framework.Text
         public readonly char Character;
 
         /// <summary>
+        /// The index of the first UTF-16 code unit of the cluster this glyph belongs to.
+        /// </summary>
+        public readonly int ClusterStart;
+
+        /// <summary>
+        /// The number of UTF-16 code units in the cluster this glyph belongs to.
+        /// </summary>
+        /// <remarks>
+        /// Shaping is contextual: a cluster can be several characters drawn as one glyph (a ligature) or several
+        /// glyphs drawn for one character (a base and its marks). Layout has to treat a cluster as a unit, because
+        /// drawing only part of one produces visibly wrong text rather than slightly wrong spacing.
+        /// </remarks>
+        public readonly int ClusterLength;
+
+        /// <summary>
         /// The horizontal distance to advance the pen by.
         /// </summary>
         public readonly float XAdvance;
@@ -41,10 +56,12 @@ namespace osu.Framework.Text
         /// </summary>
         public readonly float YOffset;
 
-        public ShapedGlyph(uint glyphId, char character, float xAdvance, float xOffset, float yOffset)
+        public ShapedGlyph(uint glyphId, char character, int clusterStart, int clusterLength, float xAdvance, float xOffset, float yOffset)
         {
             GlyphId = glyphId;
             Character = character;
+            ClusterStart = clusterStart;
+            ClusterLength = clusterLength;
             XAdvance = xAdvance;
             XOffset = xOffset;
             YOffset = yOffset;

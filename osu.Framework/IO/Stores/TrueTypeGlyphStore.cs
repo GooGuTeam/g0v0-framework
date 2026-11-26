@@ -301,7 +301,26 @@ namespace osu.Framework.IO.Stores
             if (infos.Length == 0)
                 return false;
 
-            var shaped = new ShapedGlyph[infos.Length];
+            ShapedGlyph[] shaped = new ShapedGlyph[infos.Length];
+            int[] clusters = new int[infos.Length];
+            var clusterLengths = new Dictionary<int, int>(infos.Length);
+
+            // HarfBuzz reports the offset each cluster starts at, not its length. Clusters tile the text in logical
+            // order, so a cluster ends where the next one begins, whatever order the glyphs were returned in.
+            for (int i = 0; i < infos.Length; i++)
+                clusters[i] = Math.Clamp((int)infos[i].Cluster, 0, text.Length - 1);
+
+            int[] orderedClusters = (int[])clusters.Clone();
+            Array.Sort(orderedClusters);
+
+            for (int i = 0; i < orderedClusters.Length; i++)
+            {
+                if (i + 1 < orderedClusters.Length && orderedClusters[i] == orderedClusters[i + 1])
+                    continue;
+
+                int nextCluster = i + 1 < orderedClusters.Length ? orderedClusters[i + 1] : text.Length;
+                clusterLengths[orderedClusters[i]] = nextCluster - orderedClusters[i];
+            }
 
             lock (faceLock)
             {
@@ -319,11 +338,12 @@ namespace osu.Framework.IO.Stores
                         return false;
 
                     var slot = face->glyph;
-                    int cluster = Math.Clamp((int)infos[i].Cluster, 0, text.Length - 1);
 
                     shaped[i] = new ShapedGlyph(
                         glyphId,
-                        text[cluster],
+                        text[clusters[i]],
+                        clusters[i],
+                        clusterLengths[clusters[i]],
                         positions[i].XAdvance * unitScale,
                         slot->bitmap_left + positions[i].XOffset * unitScale,
                         // HarfBuzz measures vertical offsets upwards, the framework downwards from the line top.
