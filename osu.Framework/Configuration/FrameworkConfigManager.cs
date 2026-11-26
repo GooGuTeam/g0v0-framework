@@ -59,6 +59,7 @@ namespace osu.Framework.Configuration
             SetDefault(FrameworkSetting.VulkanValidation, false);
             SetDefault(FrameworkSetting.VulkanCaptureInterop, true);
             SetDefault(FrameworkSetting.UseMediaFoundationVideoDecoder, true);
+            SetDefault(FrameworkSetting.ZeroCopyVideoDecoding, false);
             SetDefault(FrameworkSetting.OfflineVulkanRenderer, false);
             SetDefault(FrameworkSetting.ProbeBindlessTextures, true);
             SetDefault(FrameworkSetting.ClearGraphicsProbeCache, false);
@@ -204,6 +205,12 @@ namespace osu.Framework.Configuration
         VulkanValidation,
         VulkanCaptureInterop,
         UseMediaFoundationVideoDecoder,
+
+        /// <summary>
+        /// Experimental: Media Foundation hands decoded frames to Direct3D 11 and Vulkan renderers as shared textures, never through the CPU.
+        /// </summary>
+        ZeroCopyVideoDecoding,
+
         OfflineVulkanRenderer,
     }
 }

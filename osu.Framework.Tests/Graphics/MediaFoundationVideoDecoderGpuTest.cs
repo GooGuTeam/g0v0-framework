@@ -8,11 +8,13 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using NUnit.Framework;
+using osu.Framework.Configuration;
 using osu.Framework.Development;
 using osu.Framework.Graphics.Veldrid;
 using osu.Framework.Graphics.Veldrid.Textures;
 using osu.Framework.Graphics.Video;
 using osu.Framework.IO.Stores;
+using osuTK;
 using Veldrid;
 
 namespace osu.Framework.Tests.Graphics
@@ -101,6 +103,70 @@ namespace osu.Framework.Tests.Graphics
         }
 
         /// <summary>
+        /// Zero-copy decoding produces the same planes as reading DXVA frames back, on both renderers that support it.
+        /// </summary>
+        [Test]
+        [Explicit("Requires an offline graphics device, GPU readback and the native GPU video library.")]
+        public void TestZeroCopyMatchesReadback([Values("h264.mp4", "h264-hd.mp4", "hevc.mp4", "vp9.webm")] string name, [Values(false, true)] bool vulkan)
+        {
+            if (vulkan)
+                useVulkanRenderer();
+
+            double readbackTime;
+            byte[][] readbackPlanes;
+
+            using (var readback = createDecoder(name, HardwareVideoDecoder.Any))
+            {
+                (readbackTime, readbackPlanes) = decodeFirstFrame(readback);
+                Assert.That(readback.UsesSharedFrames, Is.False);
+            }
+
+            var zeroCopyFlag = typeof(FrameworkFeatureFlags).GetProperty(nameof(FrameworkFeatureFlags.ZeroCopyVideoDecoding))!;
+            zeroCopyFlag.SetValue(null, true);
+
+            double sharedTime;
+            byte[][] sharedPlanes;
+
+            try
+            {
+                using var zeroCopy = createDecoder(name, HardwareVideoDecoder.Any);
+                (sharedTime, sharedPlanes) = decodeFirstFrame(zeroCopy);
+                Assert.That(zeroCopy.UsesSharedFrames, Is.True, "zero-copy decoding in use");
+            }
+            finally
+            {
+                zeroCopyFlag.SetValue(null, false);
+            }
+
+            TestContext.Progress.WriteLine($"{name} ({renderer.Device.BackendType}): {describeDifference(sharedPlanes, readbackPlanes)}");
+            Assert.That(sharedTime, Is.EqualTo(readbackTime));
+            Assert.That(sharedPlanes, Is.EqualTo(readbackPlanes));
+        }
+
+        private void useVulkanRenderer()
+        {
+            renderer.DisposeOffline();
+
+            var offlineVulkan = typeof(FrameworkFeatureFlags).GetProperty(nameof(FrameworkFeatureFlags.OfflineVulkanRenderer))!;
+            object? wasOfflineVulkan = offlineVulkan.GetValue(null);
+            offlineVulkan.SetValue(null, true);
+
+            try
+            {
+                renderer = new VeldridRenderer();
+                renderer.InitialiseOffline(64, 64);
+            }
+            finally
+            {
+                offlineVulkan.SetValue(null, wasOfflineVulkan);
+            }
+
+            Assert.That(renderer.Device.BackendType, Is.EqualTo(GraphicsBackend.Vulkan));
+            if (!renderer.Device.GetVulkanInfo().Win32CaptureInteropEnabled)
+                Assert.Ignore("The Vulkan device lacks Win32 capture interop.");
+        }
+
+        /// <summary>
         /// Decodes a whole video without uploading frames, reporting the process CPU time spent, to compare software decoding with DXVA.
         /// </summary>
         [Test]
@@ -170,10 +236,14 @@ namespace osu.Framework.Tests.Graphics
         private byte[][] readPlanes(DecodedFrame frame)
         {
             var texture = (VeldridVideoTexture)frame.Texture.NativeTexture;
+
+            // Uploads are recorded into the frame's command lists, which only run once the frame finishes.
+            renderer.BeginFrame(new Vector2(64, 64));
             texture.Upload();
+            renderer.FinishFrame();
             renderer.Device.WaitForIdle();
 
-            return texture.GetResourceList().Select(resources =>
+            byte[][] planes = texture.GetResourceList().Select(resources =>
             {
                 var source = resources.Texture!;
                 using var staging = renderer.Factory.CreateTexture(TextureDescription.Texture2D(source.Width, source.Height, 1, 1, source.Format, TextureUsage.Staging));
@@ -191,6 +261,9 @@ namespace osu.Framework.Tests.Graphics
                 renderer.Device.Unmap(staging);
                 return data;
             }).ToArray();
+
+            Assert.That(planes[0].Any(b => b != 0), Is.True, "the frame was read back");
+            return planes;
         }
 
         private static string describeDifference(byte[][] actual, byte[][] expected)

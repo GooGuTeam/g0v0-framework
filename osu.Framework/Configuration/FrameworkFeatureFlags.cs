@@ -24,6 +24,8 @@ namespace osu.Framework.Configuration
 
         public static bool UseMediaFoundationVideoDecoder { get; private set; } = true;
 
+        public static bool ZeroCopyVideoDecoding { get; private set; }
+
         public static bool OfflineVulkanRenderer { get; private set; }
 
         private static AtlasPackingStrategy fontAtlasPacking = AtlasPackingStrategy.Etagere;
@@ -41,6 +43,7 @@ namespace osu.Framework.Configuration
             VulkanValidation = config.Get<bool>(FrameworkSetting.VulkanValidation);
             VulkanCaptureInterop = config.Get<bool>(FrameworkSetting.VulkanCaptureInterop);
             UseMediaFoundationVideoDecoder = config.Get<bool>(FrameworkSetting.UseMediaFoundationVideoDecoder);
+            ZeroCopyVideoDecoding = config.Get<bool>(FrameworkSetting.ZeroCopyVideoDecoding);
             OfflineVulkanRenderer = config.Get<bool>(FrameworkSetting.OfflineVulkanRenderer);
             PerVertexMasking.Enabled = config.Get<bool>(FrameworkSetting.PerVertexMasking);
             Renderer.TextureSlotsEnabled = config.Get<bool>(FrameworkSetting.TextureSlots);

@@ -38,6 +38,7 @@ struct VulkanRecording {
 #undef PROC
 };
 static void vkcheck(VkResult result) { if (result != VK_SUCCESS) throw std::runtime_error("Vulkan recording operation failed"); }
+#include "video_share.h"
 
 API HRESULT g0_vk_close(VulkanRecording *r) {
     if (!r) return E_INVALIDARG;

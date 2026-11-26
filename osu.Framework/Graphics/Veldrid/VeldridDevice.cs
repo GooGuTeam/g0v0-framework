@@ -143,6 +143,7 @@ namespace osu.Framework.Graphics.Veldrid
                 Device = GraphicsDevice.CreateVulkan(options, new VulkanDeviceOptions
                 {
                     EnableTextureDescriptorIndexing = FrameworkFeatureFlags.VulkanDescriptorIndexing || VeldridBindlessTextures.Requested,
+                    EnableWin32CaptureInterop = FrameworkFeatureFlags.VulkanCaptureInterop,
                 });
             }
             else

@@ -25,7 +25,8 @@ namespace osu.Framework.Graphics.Video
     /// <remarks>
     /// Unless <see cref="VideoDecoder.TargetHardwareVideoDecoders"/> is <see cref="HardwareVideoDecoder.None"/>, decoding uses DXVA on a
     /// private D3D11 device (Media Foundation still decodes codecs the GPU lacks in software). Frames are read back and converted
-    /// from NV12 to the I420 planes video textures expect.
+    /// from NV12 to the I420 planes video textures expect. With <see cref="FrameworkSetting.ZeroCopyVideoDecoding"/> (experimental) on a
+    /// Direct3D 11 or Vulkan renderer, frames stay on the GPU instead (see <see cref="MediaFoundationSharedVideo"/>).
     /// Disabling the UseMediaFoundationVideoDecoder framework setting uses FFmpeg instead, which Windows x64 builds only ship
     /// with <c>-p:G0V0KeepWindowsFfmpeg=true</c>.
     /// </remarks>
@@ -59,6 +60,15 @@ namespace osu.Framework.Graphics.Video
         private bool disposeStarted;
         private bool disposed;
         private bool loggedDecoding;
+
+        // Zero-copy output, and the lock that keeps slot releases from the draw thread away from closing the native decoder.
+        private MediaFoundationSharedVideo? shared;
+
+        /// <summary>
+        /// Whether frames stay on the GPU (zero-copy decoding); known once decoding has started.
+        /// </summary>
+        internal bool UsesSharedFrames => shared != null;
+        private readonly Lock sharedLock = new Lock();
         private volatile DecoderState state = DecoderState.Ready;
         private volatile float lastDecodedFrameTime;
         private double? skipOutputUntilTime;
@@ -168,11 +178,27 @@ namespace osu.Framework.Graphics.Video
 
             stream.Position = 0;
             bool hardware = TargetHardwareVideoDecoders.Value != HardwareVideoDecoder.None;
-            int result = g0_vdec_open(&readStream, GCHandle.ToIntPtr(handle), stream.Length, hardware ? 1 : 0, out decoder, out info);
+            long adapter = 0;
+
+            if (hardware && FrameworkFeatureFlags.ZeroCopyVideoDecoding)
+                shared = MediaFoundationSharedVideo.TryCreate(renderer, out adapter);
+
+            int result = g0_vdec_open(&readStream, GCHandle.ToIntPtr(handle), stream.Length, hardware ? 1 : 0, shared != null ? &adapter : null, shared != null ? 1 : 0,
+                out decoder, out info);
+
             if (result < 0)
             {
                 decoder = IntPtr.Zero;
+                shared?.Dispose();
+                shared = null;
                 Marshal.ThrowExceptionForHR(result);
+            }
+
+            if (shared != null && info.Shared == 0)
+            {
+                Logger.Log("Zero-copy video decoding is unavailable; reading frames back instead");
+                shared.Dispose();
+                shared = null;
             }
 
             Logger.Log($"Decoding video with Media Foundation: {info.Width}x{info.Height}, {info.FrameRate:0.##} fps");
@@ -223,6 +249,12 @@ namespace osu.Framework.Graphics.Video
 
         private void decodeNextFrame()
         {
+            if (shared != null)
+            {
+                decodeNextSharedFrame();
+                return;
+            }
+
             int width = info.Width, height = info.Height;
             if (!availableBuffers.TryDequeue(out var buffer) || buffer.Width != width || buffer.Height != height)
             {
@@ -290,6 +322,94 @@ namespace osu.Framework.Graphics.Video
             decodedFrames.Enqueue(new DecodedFrame { Time = frameTime, Texture = texture });
         }
 
+        private void decodeNextSharedFrame()
+        {
+            int result = g0_vdec_read_shared(decoder, out var frame, out long time, ref info);
+
+            switch (result)
+            {
+                case share_busy:
+                    // Every slot is still queued for upload; they come back as the renderer uploads frames.
+                    Thread.Sleep(1);
+                    return;
+
+                case 1:
+                    if (Looping)
+                        seek(0);
+                    else
+                        state = DecoderState.EndOfStream;
+                    return;
+
+                default:
+                    Marshal.ThrowExceptionForHR(result);
+                    break;
+            }
+
+            state = DecoderState.Running;
+
+            if (!loggedDecoding)
+            {
+                loggedDecoding = true;
+                Logger.Log($"Media Foundation decodes this video {(info.Hardware != 0 ? "on the GPU (DXVA)" : "in software")}, without copying frames to the CPU");
+            }
+
+            int width = info.Width, height = info.Height;
+
+            startTime ??= time;
+            double frameTime = (time - startTime.Value) / 10000.0;
+
+            if (skipOutputUntilTime > frameTime)
+            {
+                ReleaseSharedFrame(frame, false);
+                return;
+            }
+
+            skipOutputUntilTime = null;
+            lastDecodedFrameTime = (float)frameTime;
+
+            Texture? texture;
+            while (availableTextures.TryDequeue(out texture) && (texture.Width != width || texture.Height != height))
+                texture.Dispose();
+            texture ??= renderer.CreateVideoTexture(width, height);
+
+            // Videos with transparency are not supported, so frames are always opaque.
+            texture.SetData(new MediaFoundationSharedVideo.Upload(this, frame, width, height), Opacity.Opaque);
+            decodedFrames.Enqueue(new DecodedFrame { Time = frameTime, Texture = texture });
+        }
+
+        /// <summary>
+        /// Copies a shared frame into a video texture's planes, on the draw thread.
+        /// </summary>
+        internal bool CopySharedFrame(MediaFoundationSharedVideo.SharedFrame frame, int width, int height, global::Veldrid.Texture y, global::Veldrid.Texture u,
+                                      global::Veldrid.Texture v)
+        {
+            try
+            {
+                return shared?.Copy(frame, width, height, y, u, v) ?? false;
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, "Could not copy a shared video frame");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Returns a shared frame's slot to the decoder, whether or not it was copied.
+        /// </summary>
+        internal void ReleaseSharedFrame(MediaFoundationSharedVideo.SharedFrame frame, bool copied)
+        {
+            lock (sharedLock)
+            {
+                if (decoder == IntPtr.Zero)
+                    return;
+
+                int result = g0_vdec_release_shared(decoder, frame.Generation, frame.Slot, copied ? 1 : 0);
+                if (result < 0)
+                    Logger.Log($"Could not return a shared video frame (0x{result:X8})");
+            }
+        }
+
         private void seek(double targetTimestamp)
         {
             Marshal.ThrowExceptionForHR(g0_vdec_seek(decoder, (long)(targetTimestamp * 10000) + (startTime ?? 0)));
@@ -341,10 +461,16 @@ namespace osu.Framework.Graphics.Video
                 lock (streamLock)
                     disposed = true;
 
-                if (decoder != IntPtr.Zero)
+                // Consumers first: Vulkan ones wait for their copies to finish.
+                shared?.Dispose();
+
+                lock (sharedLock)
                 {
-                    g0_vdec_close(decoder);
-                    decoder = IntPtr.Zero;
+                    if (decoder != IntPtr.Zero)
+                    {
+                        g0_vdec_close(decoder);
+                        decoder = IntPtr.Zero;
+                    }
                 }
 
                 while (decodedFrames.TryDequeue(out var frame))
@@ -398,14 +524,24 @@ namespace osu.Framework.Graphics.Video
             public int Matrix;
             public int CanSeek;
             public int Hardware;
+            public int Shared;
         }
 
+        // g0_vdec_read_shared: every slot is still with the renderer.
+        private const int share_busy = 2;
+
         [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
-        private static extern int g0_vdec_open(delegate* unmanaged[Cdecl]<IntPtr, long, byte*, int, int> read, IntPtr context, long length, int hardware, out IntPtr decoder,
-                                               out DecoderInfo info);
+        private static extern int g0_vdec_open(delegate* unmanaged[Cdecl]<IntPtr, long, byte*, int, int> read, IntPtr context, long length, int hardware, long* adapter,
+                                               int share, out IntPtr decoder, out DecoderInfo info);
 
         [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vdec_read(IntPtr decoder, IntPtr y, IntPtr u, IntPtr v, int capacityWidth, int capacityHeight, out long time, ref DecoderInfo info);
+
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
+        private static extern int g0_vdec_read_shared(IntPtr decoder, out MediaFoundationSharedVideo.SharedFrame frame, out long time, ref DecoderInfo info);
+
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
+        private static extern int g0_vdec_release_shared(IntPtr decoder, int generation, int slot, int consumed);
 
         [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vdec_seek(IntPtr decoder, long time);

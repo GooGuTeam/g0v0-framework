@@ -29,10 +29,38 @@ namespace osu.Framework.Graphics.Veldrid.Textures
 
         protected override void DoUpload(ITextureUpload upload)
         {
-            if (!(upload is VideoTextureUpload videoUpload))
-                return;
+            switch (upload)
+            {
+                case VideoTextureUpload videoUpload:
+                    ensureResources(videoUpload.GetPlaneWidth(0), videoUpload.GetPlaneHeight(0));
 
-            // Do we need to generate a new texture?
+                    for (uint i = 0; i < resourceList!.Length; i++)
+                    {
+                        Renderer.UpdateTexture(
+                            resourceList[i].Texture,
+                            0,
+                            0,
+                            videoUpload.GetPlaneWidth(i),
+                            videoUpload.GetPlaneHeight(i),
+                            0,
+                            videoUpload.GetPlaneData(i),
+                            videoUpload.GetPlaneStride(i));
+                    }
+
+                    break;
+
+                case IVeldridSharedVideoUpload sharedUpload:
+                    ensureResources(sharedUpload.Width, sharedUpload.Height);
+                    sharedUpload.CopyTo(Renderer, resourceList![0].Texture, resourceList[1].Texture, resourceList[2].Texture);
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Creates the Y, U and V plane textures for frames of the given luma size, on the first upload.
+        /// </summary>
+        private void ensureResources(int lumaWidth, int lumaHeight)
+        {
             if (resourceList == null)
             {
                 Debug.Assert(memoryLease == null);
@@ -41,8 +69,8 @@ namespace osu.Framework.Graphics.Veldrid.Textures
 
                 for (uint i = 0; i < resourceList.Length; i++)
                 {
-                    int width = videoUpload.GetPlaneWidth(i);
-                    int height = videoUpload.GetPlaneHeight(i);
+                    int width = i == 0 ? lumaWidth : (lumaWidth + 1) / 2;
+                    int height = i == 0 ? lumaHeight : (lumaHeight + 1) / 2;
                     int countPixels = width * height;
 
                     resourceList[i] = new VeldridTextureResources
@@ -63,19 +91,6 @@ namespace osu.Framework.Graphics.Veldrid.Textures
 
                     textureSize += countPixels;
                 }
-            }
-
-            for (uint i = 0; i < resourceList.Length; i++)
-            {
-                Renderer.UpdateTexture(
-                    resourceList[i].Texture,
-                    0,
-                    0,
-                    videoUpload.GetPlaneWidth(i),
-                    videoUpload.GetPlaneHeight(i),
-                    0,
-                    videoUpload.GetPlaneData(i),
-                    videoUpload.GetPlaneStride(i));
             }
         }
 

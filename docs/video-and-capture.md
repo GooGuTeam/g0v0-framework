@@ -34,13 +34,15 @@ Framework support for live recording and streaming, offline replay export, frame
 
 ## Video decoding
 
-On Windows x64, `WindowsGameHost.CreateVideoDecoder` returns `MediaFoundationVideoDecoder` (`UseMediaFoundationVideoDecoder`, on), implemented in the native GPU video library:
+On Windows x64, `WindowsGameHost.CreateVideoDecoder` returns `MediaFoundationVideoDecoder` (`UseMediaFoundationVideoDecoder`, on), implemented in `g0v0.MediaFoundation.dll`:
 
-- The managed stream is read through an `IStream` behind `MFCreateMFByteStreamOnStream`. The source reader outputs NV12, which native code copies into I420 planes for the video textures. Decoding is software.
+- The managed stream is read through an `IStream` behind `MFCreateMFByteStreamOnStream`. The source reader outputs NV12, which native code copies into I420 planes for the video textures.
+- Unless `HardwareVideoDecoder` is `None`, the source reader gets a private D3D11 device and decodes with DXVA; codecs the GPU lacks still decode in software. Frames are read back from their textures. On the 1080p H.264 test video, decoding CPU time drops from 2.9 to 0.8 ms per frame (HEVC: 1.7 to 0.9 ms).
+- `ZeroCopyVideoDecoding` (experimental, off) keeps frames on the GPU with Direct3D 11 renderers and Vulkan renderers with capture interop. The decoding device is created on the renderer's adapter; a compute shader splits each NV12 frame into Y, U and V planes in one of four shared slot textures (NT handle and keyed mutex), and the renderer copies them into the video texture on its own device (`native/gpu-video/video_share.h`, `MediaFoundationSharedVideo`). Other renderers, or a failed setup, read frames back instead.
 - Timestamps start at the first frame, and seeks go to the preceding keyframe and skip to the target, as with FFmpeg. Colour conversion follows `MF_MT_YUV_MATRIX`.
 - Streams Media Foundation cannot open (FLV, or HEVC/VP9 without the Windows video extensions) fault the decoder; there is no FFmpeg fallback.
 
-The first frames of H.264 (MP4, MOV, MKV, AVI), HEVC, VP8 and VP9 test videos decode identically to FFmpeg. Windows x64 builds leave out FFmpeg's native libraries (`native/WindowsFfmpegExclusion.targets`, carried in the package's `buildTransitive`), saving about 7 MB; without them, files Media Foundation cannot open do not play. MPEG-4 Part 2 AVI files (common in old beatmaps) and hardware decoding are untested.
+The first frames of H.264 (MP4, MOV, MKV, AVI), HEVC, VP8 and VP9 test videos decode identically to FFmpeg, in software and with DXVA, and zero-copy frames match read-back ones on both renderers. (Until 2026-11-26 this comparison read back unsubmitted uploads and compared empty planes.) Windows x64 builds leave out FFmpeg's native libraries (`native/WindowsFfmpegExclusion.targets`, carried in the package's `buildTransitive`), saving about 7 MB; without them, files Media Foundation cannot open do not play. MPEG-4 Part 2 AVI files (common in old beatmaps) are untested, and zero-copy decoding has only run in offline tests on one Windows laptop.
 
 ## Not verified
 
