@@ -68,6 +68,7 @@ namespace osu.Framework.Graphics.Video
         /// Whether frames stay on the GPU (zero-copy decoding); known once decoding has started.
         /// </summary>
         internal bool UsesSharedFrames => shared != null;
+
         private readonly Lock sharedLock = new Lock();
         private volatile DecoderState state = DecoderState.Ready;
         private volatile float lastDecodedFrameTime;

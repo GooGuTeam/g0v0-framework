@@ -19,7 +19,7 @@ namespace osu.Framework.Graphics.Video
     /// The renderer's side of experimental zero-copy video decoding (<see cref="Configuration.FrameworkSetting.ZeroCopyVideoDecoding"/>):
     /// opens the decoder's shared slot textures on the Direct3D 11 or Vulkan device and copies each frame into a video texture on the GPU.
     /// </summary>
-    internal sealed unsafe class MediaFoundationSharedVideo : IDisposable
+    internal sealed class MediaFoundationSharedVideo : IDisposable
     {
         // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, the layout g0_vshare_vk_prepare leaves the video planes in.
         private const uint shader_read_only_optimal = 5;
