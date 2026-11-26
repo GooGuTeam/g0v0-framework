@@ -178,6 +178,11 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
           dotnet workload install ios --version 10.0.402
 
+      # Every iOS app project runs this file-based app after linking. Building it first keeps parallel
+      # project builds from racing to compile it into the same runfile cache.
+      - name: Build assembly stripper
+        run: dotnet build tools/AssemblyStripper.cs
+
       - name: Compile
         run: dotnet build -c Debug osu-framework.iOS.slnf
 
