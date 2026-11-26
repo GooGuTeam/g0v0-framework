@@ -19,6 +19,17 @@ namespace osu.Framework.Tests.Audio
 
         private string? captureLibrary;
 
+        /// <summary>
+        /// Skips a test that needs <c>g0v0.Audio.dll</c>, which only exists where the native recording libraries were built or downloaded.
+        /// </summary>
+        private void requireNativeLibrary()
+        {
+            string path = string.IsNullOrEmpty(captureLibrary) ? Path.Combine(AppContext.BaseDirectory, "g0v0.Audio.dll") : captureLibrary;
+
+            if (!File.Exists(path))
+                Assert.Ignore($"The native capture library was not found at {path}.");
+        }
+
         [SetUp]
         public void SetUp()
         {
@@ -41,6 +52,8 @@ namespace osu.Framework.Tests.Audio
                 Assert.IsFalse(WasapiNativeBridge.IsNativeActive);
                 return;
             }
+
+            requireNativeLibrary();
 
             bool success = WasapiNativeBridge.TryGetNativeProcedure(out IntPtr proc, out IntPtr context);
 
@@ -72,6 +85,8 @@ namespace osu.Framework.Tests.Audio
             if (RuntimeInfo.OS != RuntimeInfo.Platform.Windows)
                 return;
 
+            requireNativeLibrary();
+
             Assert.IsTrue(WasapiNativeBridge.TryGetNativeProcedure(out IntPtr proc, out IntPtr context));
 
             var wasapiProc = Marshal.GetDelegateForFunctionPointer<WasapiProc>(proc);
@@ -91,6 +106,8 @@ namespace osu.Framework.Tests.Audio
         {
             if (RuntimeInfo.OS != RuntimeInfo.Platform.Windows)
                 return;
+
+            requireNativeLibrary();
 
             Assert.IsTrue(WasapiNativeBridge.TryGetNativeProcedure(out _, out _));
             Assert.IsTrue(WasapiNativeBridge.IsNativeActive);
