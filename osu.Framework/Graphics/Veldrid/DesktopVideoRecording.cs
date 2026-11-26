@@ -96,37 +96,45 @@ namespace osu.Framework.Graphics.Veldrid
             using var registration = cancellationToken.Register(() => ready.TrySetCanceled(cancellationToken));
             host.DrawThread.Scheduler.Add(() =>
             {
+                GpuFrameCaptureSession? session = null;
+
                 try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    recording.session = ((IGpuFrameCaptureRenderer)host.Renderer).StartGpuFrameCapture(4);
-                    recording.vulkan = recording.session.Device.BackendType == GraphicsBackend.Vulkan;
-                    recording.session.MinimumFrameInterval = Stopwatch.Frequency / options.FrameRate;
+
+                    if (host.Renderer is not IGpuFrameCaptureRenderer renderer)
+                        throw new NotSupportedException("The current renderer does not support GPU frame capture.");
+
+                    recording.session = session = renderer.StartGpuFrameCapture(4);
+                    recording.vulkan = session.Device.BackendType == GraphicsBackend.Vulkan;
+                    session.MinimumFrameInterval = Stopwatch.Frequency / options.FrameRate;
 
                     if (recording.vulkan)
                     {
-                        recording.vulkanInfo = recording.session.Device.GetVulkanInfo();
+                        recording.vulkanInfo = session.Device.GetVulkanInfo();
                         if (!recording.vulkanInfo.Win32CaptureInteropEnabled)
-                            throw new NotSupportedException(@"Enable Vulkan capture interop in Settings > Flags... and restart the game.");
+                            throw new NotSupportedException(@"Vulkan capture interop is unavailable on this adapter or disabled in framework.ini.");
                     }
                     else
                     {
-                        recording.device = recording.session.Device.GetD3D11Info().Device;
+                        recording.device = session.Device.GetD3D11Info().Device;
                         Marshal.ThrowExceptionForHR(g0_record_prepare(recording.device));
                     }
 
-                    recording.session.FrameAvailable += recording.pump;
+                    session.FrameAvailable += recording.pump;
 
-                    if (!ready.TrySetResult())
-                    {
-                        recording.session.FrameAvailable -= recording.pump;
-                        recording.session.Dispose();
-                    }
+                    if (ready.TrySetResult())
+                        return;
                 }
                 catch (Exception ex)
                 {
-                    recording.session.Dispose();
                     ready.TrySetException(ex);
+                }
+
+                if (session != null)
+                {
+                    session.FrameAvailable -= recording.pump;
+                    session.Dispose();
                 }
             });
             await ready.Task.ConfigureAwait(false);

@@ -41,6 +41,7 @@ namespace osu.Framework.Graphics.Video
         private readonly string destination;
         private readonly string videoPath;
         private readonly string audioPath;
+        private readonly string muxedPath;
         private readonly CancellationToken cancellationToken;
         private readonly int ownerThread = Environment.CurrentManagedThreadId;
         private readonly byte[] audioBytes;
@@ -80,6 +81,7 @@ namespace osu.Framework.Graphics.Video
 
             videoPath = destination + $@".{Guid.NewGuid():N}.video.mp4";
             audioPath = destination + $@".{Guid.NewGuid():N}.audio.f32";
+            muxedPath = destination + $@".{Guid.NewGuid():N}.muxed.mp4";
             audioBytes = new byte[AudioFramesPerVideoFrame * 2 * sizeof(float)];
 
             try
@@ -189,7 +191,7 @@ namespace osu.Framework.Graphics.Video
 
                 throwIfPipeFailed();
                 encoder!.StandardInput.Close();
-                waitForExit(encoder, stderrTail!);
+                waitForExit(encoder, stderrTail!, muxing: false);
                 cancellationRegistration.Dispose();
                 encoder.Dispose();
                 encoder = null;
@@ -198,13 +200,16 @@ namespace osu.Framework.Graphics.Video
                 var info = createStartInfo();
                 add(info, @"-i", videoPath, @"-f", @"f32le", @"-ar", @"48000", @"-ac", @"2", @"-i", audioPath,
                     @"-map", @"0:v:0", @"-map", @"1:a:0", @"-c:v", @"copy", @"-c:a", @"aac", @"-b:a", @"192k",
-                    @"-movflags", @"+faststart", destination);
+                    @"-movflags", @"+faststart", muxedPath);
                 using var muxer = Process.Start(info) ?? throw new InvalidOperationException(@"Unable to start FFmpeg muxing.");
                 muxer.StandardInput.Close();
                 var muxerTail = readTailAsync(muxer.StandardError);
                 using var registration = cancellationToken.Register(() => kill(muxer));
-                waitForExit(muxer, muxerTail);
+                waitForExit(muxer, muxerTail, muxing: true);
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // Publish only a finished MP4 and keep any destination created during the export.
+                File.Move(muxedPath, destination);
                 completed = true;
             }
             catch
@@ -315,15 +320,45 @@ namespace osu.Framework.Graphics.Video
             return info;
         }
 
-        private void waitForExit(Process process, Task<string> tail)
+        private void waitForExit(Process process, Task<string> tail, bool muxing)
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromMinutes(5));
+            var timeout = TimeSpan.FromMinutes(5);
+            string stage = muxing ? @"muxing" : @"encoder shutdown";
 
             try
             {
-                process.WaitForExitAsync(timeout.Token).GetAwaiter().GetResult();
-                tail.WaitAsync(timeout.Token).GetAwaiter().GetResult();
+                var inactivity = Stopwatch.StartNew();
+                long previousLength = 0;
+                TimeSpan previousCpu = TimeSpan.Zero;
+                while (!process.WaitForExit(1000))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (muxing)
+                    {
+                        // Faststart may rearrange an existing file without increasing its length.
+                        var output = new FileInfo(muxedPath);
+                        long length = output.Exists ? output.Length : 0;
+                        TimeSpan cpu = process.TotalProcessorTime;
+                        if (length != previousLength || cpu != previousCpu)
+                            inactivity.Restart();
+
+                        previousLength = length;
+                        previousCpu = cpu;
+                    }
+
+                    if (inactivity.Elapsed >= timeout)
+                        throw new TimeoutException($@"FFmpeg timed out during {stage}.");
+                }
+
+                try
+                {
+                    tail.WaitAsync(timeout, cancellationToken).GetAwaiter().GetResult();
+                }
+                catch (TimeoutException ex)
+                {
+                    throw new TimeoutException($@"FFmpeg timed out draining stderr after {stage}.", ex);
+                }
+
                 cancellationToken.ThrowIfCancellationRequested();
                 if (process.ExitCode != 0)
                     throw new InvalidOperationException(describeExit(process, tail));
@@ -421,7 +456,7 @@ namespace osu.Framework.Graphics.Video
                     try { File.Delete(audioPath); }
                     finally
                     {
-                        if (!completed) File.Delete(destination);
+                        File.Delete(muxedPath);
                     }
                 }
             }

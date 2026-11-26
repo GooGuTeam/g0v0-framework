@@ -20,7 +20,7 @@ namespace osu.Framework.Configuration
 
         public static bool VulkanValidation { get; private set; }
 
-        public static bool VulkanCaptureInterop { get; private set; }
+        public static bool VulkanCaptureInterop { get; private set; } = true;
 
         public static bool UseMediaFoundationVideoDecoder { get; private set; } = true;
 

@@ -57,7 +57,7 @@ namespace osu.Framework.Configuration
             SetDefault(FrameworkSetting.VulkanBindlessTextures, false);
             SetDefault(FrameworkSetting.VulkanDescriptorIndexing, false);
             SetDefault(FrameworkSetting.VulkanValidation, false);
-            SetDefault(FrameworkSetting.VulkanCaptureInterop, false);
+            SetDefault(FrameworkSetting.VulkanCaptureInterop, true);
             SetDefault(FrameworkSetting.UseMediaFoundationVideoDecoder, true);
             SetDefault(FrameworkSetting.OfflineVulkanRenderer, false);
             SetDefault(FrameworkSetting.ProbeBindlessTextures, true);
