@@ -18,8 +18,14 @@ namespace osu.Framework.Audio.Mixing
         private readonly BassAudioMixer mixer;
         private bool disposed;
         private readonly int ownerThread;
-        private readonly bool previousAudioThread;
-        private readonly int previousDevice;
+        [ThreadStatic]
+        private static int threadMixerCount;
+
+        [ThreadStatic]
+        private static bool previousAudioThread;
+
+        [ThreadStatic]
+        private static int previousDevice;
 
         public AudioMixer Mixer => mixer;
         public int Handle => mixer.Handle;
@@ -27,13 +33,20 @@ namespace osu.Framework.Audio.Mixing
         public OfflineAudioMixer()
         {
             ownerThread = Environment.CurrentManagedThreadId;
-            previousAudioThread = ThreadSafety.IsAudioThread;
-            ThreadSafety.IsAudioThread = true;
-            previousDevice = ManagedBass.Bass.CurrentDevice;
+            if (threadMixerCount == 0)
+            {
+                previousDevice = ManagedBass.Bass.CurrentDevice;
+                previousAudioThread = ThreadSafety.IsAudioThread;
+                ThreadSafety.IsAudioThread = true;
+            }
+
+            threadMixerCount++;
+            bool acquiredDevice = false;
 
             try
             {
-                ensureBassDevice();
+                BassNoSoundDevice.AcquireForOfflineMixing();
+                acquiredDevice = true;
                 mixer = new BassAudioMixer(null, null, @"Offline export", offline: true);
                 mixer.Update();
 
@@ -46,19 +59,12 @@ namespace osu.Framework.Audio.Mixing
             }
             catch
             {
-                if (previousDevice >= 0)
-                    ManagedBass.Bass.CurrentDevice = previousDevice;
-                ThreadSafety.IsAudioThread = previousAudioThread;
+                if (acquiredDevice)
+                    BassNoSoundDevice.ReleaseFromOfflineMixing();
+
+                restoreThreadState();
                 throw;
             }
-        }
-
-        private static void ensureBassDevice()
-        {
-            if (!ManagedBass.Bass.Init(ManagedBass.Bass.NoSoundDevice) && ManagedBass.Bass.LastError != Errors.Already)
-                throw new InvalidOperationException($@"Unable to initialise the private audio device: {ManagedBass.Bass.LastError}");
-
-            ManagedBass.Bass.CurrentDevice = ManagedBass.Bass.NoSoundDevice;
         }
 
         /// <summary>
@@ -146,10 +152,10 @@ namespace osu.Framework.Audio.Mixing
 
         public void Dispose()
         {
-            requireAudioThread();
             if (disposed)
                 return;
 
+            requireAudioThread();
             disposed = true;
             foreach (int sampleId in loadedSamples.Values)
                 ManagedBass.Bass.SampleFree(sampleId);
@@ -162,10 +168,19 @@ namespace osu.Framework.Audio.Mixing
             }
             finally
             {
-                if (previousDevice >= 0)
-                    ManagedBass.Bass.CurrentDevice = previousDevice;
-                ThreadSafety.IsAudioThread = previousAudioThread;
+                BassNoSoundDevice.ReleaseFromOfflineMixing();
+                restoreThreadState();
             }
+        }
+
+        private static void restoreThreadState()
+        {
+            if (--threadMixerCount != 0)
+                return;
+
+            if (previousDevice >= 0)
+                ManagedBass.Bass.CurrentDevice = previousDevice;
+            ThreadSafety.IsAudioThread = previousAudioThread;
         }
 
         private void requireAudioThread()

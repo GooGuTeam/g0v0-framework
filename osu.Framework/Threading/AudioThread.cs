@@ -10,6 +10,7 @@ using ManagedBass;
 using ManagedBass.Mix;
 using ManagedBass.Wasapi;
 using osu.Framework.Audio;
+using osu.Framework.Audio.Mixing.Bass;
 using osu.Framework.Bindables;
 using osu.Framework.Development;
 using osu.Framework.Logging;
@@ -148,8 +149,16 @@ namespace osu.Framework.Threading
             freeWasapi();
 
             // Try to initialise the device, or request a re-initialise.
-            if (!Bass.Init(deviceId, Flags: (DeviceInitFlags)128) && Bass.LastError != Errors.Already) // 128 == BASS_DEVICE_REINIT
+            const DeviceInitFlags reinit = (DeviceInitFlags)128; // BASS_DEVICE_REINIT
+            bool initialised = deviceId == Bass.NoSoundDevice
+                ? BassNoSoundDevice.InitialiseForPlayback(reinit)
+                : Bass.Init(deviceId, Flags: reinit) || Bass.LastError == Errors.Already;
+            if (!initialised)
                 return false;
+
+            // Keep track of the no-sound device even if subsequent WASAPI setup fails.
+            if (deviceId == Bass.NoSoundDevice)
+                initialised_devices.Add(deviceId);
 
             if (useWasapi)
             {
@@ -169,7 +178,9 @@ namespace osu.Framework.Threading
             freeWasapi();
             int selectedDevice = Bass.CurrentDevice;
 
-            if (canSelectDevice(deviceId))
+            if (deviceId == Bass.NoSoundDevice)
+                BassNoSoundDevice.ReleaseFromPlayback();
+            else if (canSelectDevice(deviceId))
             {
                 Bass.CurrentDevice = deviceId;
                 Bass.Free();
