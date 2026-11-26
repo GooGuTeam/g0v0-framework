@@ -84,6 +84,7 @@ API uint64_t g0_capture_dropped_frames(Capture *c) {
 // Exactly one native producer. No CLR, allocation, logging, locks or consumer waits.
 API DWORD WINAPI g0_capture_callback(void *buffer, DWORD length, void *user) {
     Capture *c = user;
+    if (!c) return 0;
     DWORD mixer = atomic_load_explicit(&c->mixer, memory_order_acquire);
     if (!mixer) return 0;
     DWORD result = c->get_data(mixer, buffer, length);

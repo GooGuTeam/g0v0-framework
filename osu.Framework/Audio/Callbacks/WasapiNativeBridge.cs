@@ -21,6 +21,9 @@ namespace osu.Framework.Audio.Callbacks
         private static IntPtr userContext = IntPtr.Zero;
         private static IntPtr nativeProcedure = IntPtr.Zero;
 
+        // The procedure last handed out: the native capture library's or the inlined thunk.
+        private static IntPtr activeProcedure = IntPtr.Zero;
+
         private static string providerName = "Uninitialized";
         private static bool isInitialized;
 
@@ -44,7 +47,7 @@ namespace osu.Framework.Audio.Callbacks
             get
             {
                 lock (sync_lock)
-                    return nativeProcedure != IntPtr.Zero;
+                    return activeProcedure != IntPtr.Zero;
             }
         }
 
@@ -71,6 +74,7 @@ namespace osu.Framework.Audio.Callbacks
                     if (tryGetBassChannelGetData(out IntPtr getData) && NativeWasapiCapture.TryCreate(getData, out procedure, out context))
                     {
                         providerName = "Native PCM capture bridge";
+                        activeProcedure = procedure;
                         return true;
                     }
                 }
@@ -82,7 +86,7 @@ namespace osu.Framework.Audio.Callbacks
 
                 if (isInitialized && nativeProcedure != IntPtr.Zero)
                 {
-                    procedure = nativeProcedure;
+                    procedure = activeProcedure = nativeProcedure;
                     context = userContext;
                     return true;
                 }
@@ -96,7 +100,7 @@ namespace osu.Framework.Audio.Callbacks
                 if (tryCreateInlinedNativeThunk(out nativeProcedure, out string archName))
                 {
                     isInitialized = true;
-                    procedure = nativeProcedure;
+                    procedure = activeProcedure = nativeProcedure;
                     context = userContext;
                     providerName = $"Inlined Native Machine Code ({archName})";
                     Logger.Log($"WASAPI native callback bridge activated ({providerName})");
@@ -159,6 +163,7 @@ namespace osu.Framework.Audio.Callbacks
                     userContext = IntPtr.Zero;
                 }
 
+                activeProcedure = IntPtr.Zero;
                 providerName = "Uninitialized";
                 isInitialized = false;
             }

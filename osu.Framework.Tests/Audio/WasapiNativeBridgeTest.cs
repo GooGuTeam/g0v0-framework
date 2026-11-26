@@ -2,6 +2,7 @@
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
 using NUnit.Framework;
 using osu.Framework.Audio.Callbacks;
@@ -14,10 +15,21 @@ namespace osu.Framework.Tests.Audio
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         private delegate uint WasapiProc(IntPtr buffer, uint length, IntPtr user);
 
+        private const string capture_library_variable = @"G0V0_WASAPI_CAPTURE_LIBRARY";
+
+        private string? captureLibrary;
+
+        [SetUp]
+        public void SetUp()
+        {
+            captureLibrary = Environment.GetEnvironmentVariable(capture_library_variable);
+        }
+
         [TearDown]
         public void TearDown()
         {
             WasapiNativeBridge.Free();
+            Environment.SetEnvironmentVariable(capture_library_variable, captureLibrary);
         }
 
         [Test]
@@ -45,6 +57,9 @@ namespace osu.Framework.Tests.Audio
         {
             if (RuntimeInfo.OS != RuntimeInfo.Platform.Windows)
                 return;
+
+            // The context is read as the inlined thunk's mixer handle, so skip the native capture library (g0v0.Audio.dll).
+            Environment.SetEnvironmentVariable(capture_library_variable, Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "missing.dll"));
 
             Assert.IsTrue(WasapiNativeBridge.TryGetNativeProcedure(out _, out IntPtr context));
             Assert.AreEqual(0, Marshal.ReadInt32(context));
