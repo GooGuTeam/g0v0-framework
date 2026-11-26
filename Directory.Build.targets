@@ -1,10 +1,11 @@
 ﻿<Project>
-  <!-- Builds normally restore the published g0v0.Veldrid packages. To try unreleased renderer changes locally, check out g0v0-veldrid beside
-       this repository and pass -p:G0V0SourceVeldrid=true (or -p:G0V0SourceBuild=true, which the client also understands) to reference its
-       projects instead. Source references are for local development only: packing is rejected, and CI and releases use packages. -->
+  <!-- g0v0-veldrid is built from source when its checkout sits beside this repository, and restored as the published
+       g0v0.Veldrid packages otherwise. -p:G0V0SourceBuild=false (shared with the client) forces packages, -p:G0V0SourceBuild=true
+       requires the checkout, and -p:G0V0SourceVeldrid overrides just this one. Packing always uses packages. -->
   <PropertyGroup>
     <_G0V0VeldridRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../g0v0-veldrid/'))</_G0V0VeldridRoot>
     <G0V0SourceVeldrid Condition="'$(G0V0SourceVeldrid)' == '' and '$(G0V0SourceBuild)' == 'true'">true</G0V0SourceVeldrid>
+    <G0V0SourceVeldrid Condition="'$(G0V0SourceVeldrid)' == '' and '$(G0V0SourceBuild)' != 'false' and '$(_IsPacking)' != 'true' and Exists('$(_G0V0VeldridRoot)src/Veldrid/Veldrid.csproj')">true</G0V0SourceVeldrid>
   </PropertyGroup>
   <Target Name="G0V0ValidateSourceVeldrid" BeforeTargets="CollectPackageReferences;PrepareForBuild" Condition="'$(G0V0SourceVeldrid)' == 'true'">
     <Error Condition="!Exists('$(_G0V0VeldridRoot)src/Veldrid/Veldrid.csproj')" Text="G0V0SourceVeldrid requires a g0v0-veldrid checkout at $(_G0V0VeldridRoot)." />
@@ -12,7 +13,7 @@
   <ItemGroup Condition="'$(G0V0SourceVeldrid)' == 'true' and '$(MSBuildProjectName)' == 'osu.Framework'">
     <PackageReference Remove="g0v0.Veldrid;g0v0.Veldrid.SPIRV" />
     <ProjectReference Include="$(_G0V0VeldridRoot)src/Veldrid/Veldrid.csproj" />
-    <!-- iOS uses Metal only. Android keeps SPIRV for its Vulkan backend; the client packages its native library (see g0v0's build/SourceDependencies.targets). -->
+    <!-- iOS uses Metal only. Android keeps SPIRV for its Vulkan backend. -->
     <ProjectReference Include="$(_G0V0VeldridRoot)src/Veldrid.SPIRV/Veldrid.SPIRV.csproj" Condition="'$(TargetPlatformIdentifier)' != 'ios'" />
   </ItemGroup>
   <Import Project="$(MSBuildThisFileDirectory)build/SpirvBesideApplication.targets" Condition="'$(G0V0SourceVeldrid)' == 'true'" />

@@ -6,9 +6,10 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force $Output | Out-Null
-& $Zig cc -target x86_64-windows-gnu -O2 -Wall -Wextra -Werror -shared `
+& $Zig cc -target x86_64-windows-gnu -O2 -DNDEBUG -fno-sanitize=undefined -fno-stack-protector -fvisibility=hidden -ffunction-sections -fdata-sections -Wall -Wextra -Werror -shared `
     "$PSScriptRoot/audio_bridge.c" -I "$SdlSdk/include" -I "$MixerSdk/include" `
     "$SdlSdk/lib/x64/SDL3.lib" "$MixerSdk/lib/x64/SDL3_mixer.lib" `
+    -Wl,--gc-sections -Wl,-s `
     -o "$Output/g0_audio.dll"
 if ($LASTEXITCODE -ne 0) { throw 'Native audio bridge compilation failed' }
 Copy-Item "$SdlSdk/lib/x64/SDL3.dll", "$MixerSdk/lib/x64/SDL3_mixer.dll" $Output

@@ -1,14 +1,37 @@
 cmake_minimum_required(VERSION 3.24)
 # Link the C++ runtime statically, so the library does not depend on the Visual C++ redistributable or the system libstdc++.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-project(g0v0-image-codecs LANGUAGES CXX)
+project(g0v0-image-codecs LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
 if(MSVC)
     # Third-party sources are UTF-8; without this, non-UTF-8 system code pages warn (C4819).
     add_compile_options(/utf-8)
+    # Release builds disable runtime security cookie checks (/GS-), RTTI (/GR-), and enable dead-code elimination (/Gy /Gw).
+    add_compile_options(
+        $<$<CONFIG:Release,MinSizeRel>:/GS->
+        $<$<CONFIG:Release,MinSizeRel>:/Gy>
+        $<$<CONFIG:Release,MinSizeRel>:/Gw>
+        $<$<CONFIG:Release,MinSizeRel>:/Oi>
+        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:Release,MinSizeRel>>:/GR->
+    )
+else()
+    # Release builds omit debug info (-g0), stack-protector/fortify/UBSan runtime checks, and RTTI,
+    # and place each function/datum in its own section so the linker can drop unreachable code.
+    add_compile_options(
+        $<$<CONFIG:Release,MinSizeRel>:-g0>
+        $<$<CONFIG:Release,MinSizeRel>:-fno-stack-protector>
+        $<$<CONFIG:Release,MinSizeRel>:-U_FORTIFY_SOURCE>
+        $<$<CONFIG:Release,MinSizeRel>:-D_FORTIFY_SOURCE=0>
+        $<$<CONFIG:Release,MinSizeRel>:-fno-sanitize=undefined>
+        $<$<CONFIG:Release,MinSizeRel>:-ffunction-sections>
+        $<$<CONFIG:Release,MinSizeRel>:-fdata-sections>
+        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:Release,MinSizeRel>>:-fno-rtti>
+    )
 endif()
 
 set(WUFFS_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/wuffs")
@@ -34,6 +57,24 @@ target_sources(g0v0-image-codecs PRIVATE cpu_diagnostics.cpp)
 target_link_libraries(g0v0-image-codecs PRIVATE CpuFeatures::cpu_features)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cpu_features/LICENSE" DESTINATION licences RENAME LICENCE-cpu_features)
 target_include_directories(g0v0-image-codecs PRIVATE "${WUFFS_SOURCE_DIR}/release/c" "${STB_SOURCE_DIR}")
+
+if(MSVC)
+    target_link_options(g0v0-image-codecs PRIVATE
+        $<$<CONFIG:Release,MinSizeRel>:/OPT:REF>
+        $<$<CONFIG:Release,MinSizeRel>:/OPT:ICF>
+    )
+elseif(APPLE)
+    target_link_options(g0v0-image-codecs PRIVATE
+        $<$<CONFIG:Release,MinSizeRel>:-Wl,-dead_strip>
+    )
+else()
+    target_link_options(g0v0-image-codecs PRIVATE
+        $<$<CONFIG:Release,MinSizeRel>:-Wl,--gc-sections>
+        $<$<CONFIG:Release,MinSizeRel>:-Wl,--exclude-libs,ALL>
+        $<$<CONFIG:Release,MinSizeRel>:-Wl,--strip-all>
+    )
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(g0v0-image-codecs PRIVATE -static-libstdc++ -static-libgcc)
 endif()

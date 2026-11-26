@@ -57,14 +57,21 @@ $stage = Join-Path $OutputDirectory ([Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $stage | Out-Null
 try {
     # Build libraries only; probes are deliberately excluded.
-    & $Zig c++ -target x86_64-windows-gnu -std=c++17 -O2 -Wall -Wextra -Werror -shared `
+    # Disable Zig's default UBSan traps and strip symbols/dead sections for Release builds.
+    & $Zig c++ -target x86_64-windows-gnu -std=c++17 -O2 -DNDEBUG -fno-sanitize=undefined -fno-stack-protector `
+        -fvisibility=hidden -fvisibility-inlines-hidden -ffunction-sections -fdata-sections `
+        -Wall -Wextra -Werror -shared `
         (Join-Path $video 'vulkan_recording.cpp') -I $VulkanHeaders `
         -o (Join-Path $stage 'g0v0-gpu-video.dll') `
+        -Wl,--gc-sections -Wl,-s `
         -ld3d11 -ldxgi -lmfplat -lmfreadwrite -lmfuuid -lole32 -levr
     if ($LASTEXITCODE -ne 0) { throw 'GPU recording library compilation failed.' }
 
-    & $Zig cc -target x86_64-windows-gnu -std=c11 -O2 -Wall -Wextra -Werror -shared `
-        (Join-Path $audio 'capture.c') -o (Join-Path $stage 'g0v0-wasapi-capture.dll')
+    & $Zig cc -target x86_64-windows-gnu -std=c11 -O2 -DNDEBUG -fno-sanitize=undefined -fno-stack-protector `
+        -fvisibility=hidden -ffunction-sections -fdata-sections `
+        -Wall -Wextra -Werror -shared `
+        (Join-Path $audio 'capture.c') -o (Join-Path $stage 'g0v0-wasapi-capture.dll') `
+        -Wl,--gc-sections -Wl,-s
     if ($LASTEXITCODE -ne 0) { throw 'WASAPI capture library compilation failed.' }
 
     foreach ($name in @('g0v0-gpu-video.dll', 'g0v0-wasapi-capture.dll')) {

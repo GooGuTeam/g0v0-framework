@@ -1,0 +1,14 @@
+﻿<Project>
+  <!-- Windows uses SDL3 by default (FrameworkEnvironment.UseSDL3 = true on non-macOS), so the native SDL2.dll is not shipped there.
+       Set G0V0KeepWindowsSdl2 to true to keep SDL2.dll (for OSU_SDL3=0 fallback). -->
+  <Target Name="G0V0ExcludeWindowsSdl2" AfterTargets="ResolvePackageAssets" Condition="'$(G0V0KeepWindowsSdl2)' != 'true'">
+    <ItemGroup>
+      <!-- RID-specific Windows builds and publishes copy native assets flat. -->
+      <NativeCopyLocalItems Remove="@(NativeCopyLocalItems)"
+                            Condition="$([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('win-')) and '%(Filename)' == 'SDL2'" />
+      <!-- RID-less builds copy every runtime's assets under runtimes/. -->
+      <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)"
+                                    Condition="$([System.String]::Copy('%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)').StartsWith('win-')) and '%(Filename)' == 'SDL2'" />
+    </ItemGroup>
+  </Target>
+</Project>
