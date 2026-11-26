@@ -275,7 +275,22 @@ namespace osu.Framework
             => addFont(target ?? Fonts, store, assetName);
 
         private void addFont(FontStore target, ResourceStore<byte[]> store, string assetName = null)
-            => target.AddTextureSource(new RawCachingGlyphStore(store, assetName, Host.CreateTextureLoaderStore(store)));
+            => target.AddTextureSource(CreateGlyphStore(store, assetName, Host.CreateTextureLoaderStore(store)));
+
+        /// <summary>
+        /// Creates the glyph store for a font asset: a <see cref="TrueTypeGlyphStore"/> when <paramref name="store"/> has a TrueType / OpenType
+        /// file for <paramref name="assetName"/> (<c>.ttf</c> / <c>.otf</c>), otherwise a pre-rendered bitmap font (<c>.bin</c> / <c>.fnt</c> with page images).
+        /// </summary>
+        /// <param name="store">The store providing the font files.</param>
+        /// <param name="assetName">The font's asset name without extension.</param>
+        /// <param name="textureLoader">The texture loader for bitmap font pages.</param>
+        public static IResourceStore<TextureUpload> CreateGlyphStore(ResourceStore<byte[]> store, string assetName, IResourceStore<TextureUpload> textureLoader = null)
+        {
+            if (assetName != null && TrueTypeGlyphStore.Exists(store, assetName))
+                return new TrueTypeGlyphStore(store, assetName);
+
+            return new RawCachingGlyphStore(store, assetName, textureLoader);
+        }
 
         protected override void LoadComplete()
         {

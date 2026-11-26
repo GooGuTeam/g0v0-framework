@@ -23,7 +23,7 @@ namespace osu.Framework.IO.Stores
     /// <summary>
     /// A basic glyph store that will load font sprite sheets every character retrieval.
     /// </summary>
-    public class GlyphStore : IResourceStore<TextureUpload>, IGlyphStore
+    public class GlyphStore : IResourceStore<TextureUpload>, IMultiResolutionGlyphStore
     {
         protected readonly string AssetName;
 
@@ -62,64 +62,28 @@ namespace osu.Framework.IO.Stores
 
             AssetName = assetName;
             TextureLoader = textureLoader;
-            asciiHighDefinitionStore = new Lazy<GlyphStore>(loadHighDefinitionStore);
 
             FontName = assetName?.Split('/').Last() ?? string.Empty;
             resourceNamePrefix = $"{FontName}/";
-            highDefinitionResourceNamePrefix = $"{resourceNamePrefix}{HIGH_DEFINITION_PREFIX}";
         }
 
         private Task fontLoadTask;
-        private readonly Lazy<GlyphStore> asciiHighDefinitionStore;
         private readonly string resourceNamePrefix;
-        private readonly string highDefinitionResourceNamePrefix;
-
-        internal const string HIGH_DEFINITION_PREFIX = "ASCII-HD/";
 
         internal bool LowResolutionTextures { get; set; }
 
+        bool IMultiResolutionGlyphStore.LowResolutionTextures
+        {
+            get => LowResolutionTextures;
+            set => LowResolutionTextures = value;
+        }
+
         /// <summary>
-        /// Texture resolution multiplier for a printable ASCII glyph. Layout metrics remain those of the original font.
+        /// Bitmap fonts only have their pre-rendered resolution, optionally halved by <see cref="LowResolutionTextures"/>.
         /// </summary>
-        public float GetTextureScale(char character) => GetTextureScale(character, false);
+        public float GetTextureScale(char character, int tier) => LowResolutionTextures ? 0.5f : 1;
 
-        internal float GetTextureScale(char character, bool highDefinition)
-        {
-            if (LowResolutionTextures)
-                return 0.5f;
-
-            if (!highDefinition || character < ' ' || character > '~')
-                return 1;
-
-            var companion = asciiHighDefinitionStore.Value;
-            return companion?.HasGlyph(character) == true ? (float)companion.Font.Common.LineHeight / Font.Common.LineHeight : 1;
-        }
-
-        private GlyphStore loadHighDefinitionStore()
-        {
-            // Resolve only after a large glyph is requested. Never recursively probe companions.
-            if (Font == null || AssetName?.EndsWith("-ASCII-HD", StringComparison.Ordinal) == true)
-                return null;
-
-            using var stream = Store.GetStream($"{AssetName}-ASCII-HD");
-            if (stream == null)
-                return null;
-
-            var candidate = new GlyphStore(Store, $"{AssetName}-ASCII-HD", TextureLoader);
-            try
-            {
-                candidate.LoadFontAsync().GetAwaiter().GetResult();
-                if (candidate.Font.Common.LineHeight > Font.Common.LineHeight)
-                    return candidate;
-            }
-            catch
-            {
-                // A broken optional companion must not prevent loading the original font.
-            }
-
-            candidate.Dispose();
-            return null;
-        }
+        public string GetTextureName(char character, int tier) => $"{resourceNamePrefix}{character}";
 
         public Task LoadFontAsync() => fontLoadTask ??= Task.Factory.StartNew(() =>
         {
@@ -195,9 +159,6 @@ namespace osu.Framework.IO.Stores
                 return null;
 
             char character = name.Last();
-            if (GetTextureScale(character, name.StartsWith(highDefinitionResourceNamePrefix, StringComparison.Ordinal)) > 1)
-                return asciiHighDefinitionStore.Value.Get(character.ToString());
-
             return Font.Characters.TryGetValue(character, out Character c) ? LoadCharacter(c) : null;
         }
 
@@ -209,9 +170,6 @@ namespace osu.Framework.IO.Stores
             var bmFont = await completionSource.Task.ConfigureAwait(false);
 
             char character = name.Last();
-            if (GetTextureScale(character, name.StartsWith(highDefinitionResourceNamePrefix, StringComparison.Ordinal)) > 1)
-                return await asciiHighDefinitionStore.Value.GetAsync(character.ToString(), cancellationToken).ConfigureAwait(false);
-
             return bmFont.Characters.TryGetValue(character, out Character c)
                 ? LoadCharacter(c)
                 : null;
@@ -293,8 +251,6 @@ namespace osu.Framework.IO.Stores
 
         protected virtual void Dispose(bool disposing)
         {
-            if (disposing && asciiHighDefinitionStore.IsValueCreated)
-                asciiHighDefinitionStore.Value?.Dispose();
         }
 
         #endregion

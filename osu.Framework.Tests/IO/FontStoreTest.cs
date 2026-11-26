@@ -4,7 +4,6 @@
 #nullable disable
 
 using System;
-using System.IO;
 using NUnit.Framework;
 using SharpFNT;
 using osu.Framework.Graphics;
@@ -21,6 +20,7 @@ namespace osu.Framework.Tests.IO
     public class FontStoreTest
     {
         private ResourceStore<byte[]> fontResourceStore;
+        private ResourceStore<byte[]> trueTypeResourceStore;
         private TemporaryNativeStorage storage;
 
         [OneTimeSetUp]
@@ -28,6 +28,7 @@ namespace osu.Framework.Tests.IO
         {
             storage = new TemporaryNativeStorage("fontstore-test");
             fontResourceStore = new NamespacedResourceStore<byte[]>(new DllResourceStore(typeof(Drawable).Assembly), "Resources.Fonts.Roboto");
+            trueTypeResourceStore = new NamespacedResourceStore<byte[]>(new DllResourceStore(typeof(FontStoreTest).Assembly), "Resources/Fonts/Figtree");
         }
 
         [Test]
@@ -64,17 +65,6 @@ namespace osu.Framework.Tests.IO
             Assert.That(highDefinition.YOffset, Is.EqualTo(normal.YOffset));
             Assert.That(highDefinition.XAdvance, Is.EqualTo(normal.XAdvance));
             Assert.That(highDefinition.Baseline, Is.EqualTo(normal.Baseline));
-        }
-
-        [Test]
-        public void TestMissingHighDefinitionCompanionUsesOriginalGlyphs()
-        {
-            using var glyphStore = new RawCachingGlyphStore(fontResourceStore, "Roboto-Regular") { CacheStorage = storage };
-            glyphStore.LoadFontAsync().GetAwaiter().GetResult();
-            Assert.That(glyphStore.GetTextureScale('a'), Is.EqualTo(1));
-            Assert.That(glyphStore.GetTextureScale('中'), Is.EqualTo(1));
-            using var upload = glyphStore.Get("Roboto-Regular/a");
-            Assert.That(upload, Is.Not.Null);
         }
 
         [Test]
@@ -177,73 +167,103 @@ namespace osu.Framework.Tests.IO
         }
 
         [Test]
-        public void TestHighDefinitionLoadsOnlyAboveNativeSize()
+        public void TestTrueTypeMetricsUseCellHeight()
         {
-            using var resources = new CompanionResources(fontResourceStore);
-            using var fonts = new FontStore(new DummyRenderer(), new GlyphStore(resources, "Roboto-Regular"), scaleAdjust: 100);
-            var normal = fonts.GetForSize("Roboto-Regular", 'a', 100);
-            Assert.That(resources.CompanionRequests, Is.Zero);
-            var high = fonts.GetForSize("Roboto-Regular", 'a', 101);
-            Assert.That(resources.CompanionRequests, Is.GreaterThan(0));
-            Assert.That(high.Width, Is.EqualTo(normal.Width / 2));
-            Assert.That(high.XAdvance, Is.EqualTo(normal.XAdvance));
-            Assert.That(high.Baseline, Is.EqualTo(normal.Baseline));
-            Assert.That(fonts.GetForSize("Roboto-Regular", 'a', 50), Is.SameAs(normal));
-            Assert.That(fonts.GetForSize("Roboto-Regular", 'a', 200), Is.SameAs(high));
+            using var glyphStore = new TrueTypeGlyphStore(trueTypeResourceStore, "Figtree-Regular");
+            glyphStore.LoadFontAsync().GetAwaiter().GetResult();
+
+            // Figtree's hhea ascender/descender are 950/-250, so the baseline sits at 950/1200 of a 100px cell.
+            Assert.That(glyphStore.Baseline, Is.EqualTo(100 * 950f / 1200).Within(0.01f));
+            Assert.That(glyphStore.HasGlyph('A'), Is.True);
+            Assert.That(glyphStore.HasGlyph('中'), Is.False);
+
+            var glyph = glyphStore.Get('H');
+            Assert.That(glyph, Is.Not.Null);
+            Assert.That(glyph!.XAdvance, Is.GreaterThan(0));
+            Assert.That(glyph.YOffset, Is.GreaterThan(0), "a cap-height glyph starts below the top of the cell");
+
+            using var texture = glyphStore.Get("Figtree-Regular/H");
+            Assert.That(texture, Is.Not.Null);
+            Assert.That(glyph.YOffset + texture.Height, Is.EqualTo(glyphStore.Baseline!.Value).Within(1), "an 'H' sits on the baseline");
         }
 
         [Test]
-        public void TestNestedFontUsesItsOwnResolutionThreshold()
+        public void TestTrueTypeKerningFromGpos()
         {
-            using var resources = new CompanionResources(fontResourceStore);
-            using var fonts = new FontStore(new DummyRenderer(), scaleAdjust: 100, useAtlas: false);
-            using var nested = new FontStore(new DummyRenderer(), new GlyphStore(resources, "Roboto-Regular"), scaleAdjust: 50);
-            fonts.AddStore(nested);
-            var normal = fonts.GetForSize("Roboto-Regular", 'a', 50);
-            var high = fonts.GetForSize("Roboto-Regular", 'a', 51);
-            Assert.That(high.Width, Is.EqualTo(normal.Width / 2));
-            Assert.That(fonts.GetForSize("Roboto-Regular", 'a', 50), Is.SameAs(normal));
+            using var glyphStore = new TrueTypeGlyphStore(trueTypeResourceStore, "Figtree-Regular");
+            glyphStore.LoadFontAsync().GetAwaiter().GetResult();
+
+            Assert.That(glyphStore.GetKerning('A', 'V'), Is.LessThan(0));
+            Assert.That(glyphStore.GetKerning('T', 'o'), Is.LessThan(0));
+            Assert.That(glyphStore.GetKerning('H', 'H'), Is.Zero);
         }
 
-        // Reuse the bitmap while doubling the declared resolution to test selection independently of rendering.
-        private class CompanionResources : ResourceStore<byte[]>, IResourceStore<byte[]>
+        [Test]
+        public void TestTrueTypeResolutionTiers()
         {
-            public int CompanionRequests { get; private set; }
+            using var glyphStore = new TrueTypeGlyphStore(trueTypeResourceStore, "Figtree-Regular");
+            using var fonts = new FontStore(new DummyRenderer(), glyphStore, scaleAdjust: 100);
 
-            public CompanionResources(IResourceStore<byte[]> source)
-                : base(source)
-            {
-            }
+            var normal = fonts.GetForSize("Figtree-Regular", 'a', 100);
+            var doubled = fonts.GetForSize("Figtree-Regular", 'a', 101);
+            var quadrupled = fonts.GetForSize("Figtree-Regular", 'a', 300);
 
-            Stream IResourceStore<byte[]>.GetStream(string name)
-            {
-                if (!name.Contains("-ASCII-HD", StringComparison.Ordinal))
-                    return GetStream(name);
+            Assert.That(normal, Is.Not.Null);
+            Assert.That(doubled.Texture.Width, Is.EqualTo(normal.Texture.Width * 2).Within(2));
+            Assert.That(quadrupled.Texture.Width, Is.EqualTo(normal.Texture.Width * 4).Within(4));
 
-                CompanionRequests++;
-                using var original = GetStream(name.Replace("-ASCII-HD", string.Empty, StringComparison.Ordinal));
-                if (original == null)
-                    return null;
+            // Higher resolution textures keep the glyph's size and metrics.
+            Assert.That(doubled.Width, Is.EqualTo(normal.Width).Within(0.02f));
+            Assert.That(quadrupled.Width, Is.EqualTo(normal.Width).Within(0.02f));
+            Assert.That(doubled.XAdvance, Is.EqualTo(normal.XAdvance));
+            Assert.That(quadrupled.Baseline, Is.EqualTo(normal.Baseline));
 
-                using var result = new MemoryStream();
-                original.CopyTo(result);
-                byte[] bytes = result.ToArray();
-                if (name.EndsWith(".bin", StringComparison.Ordinal))
-                {
-                    // BMFont common block starts with lineHeight (uint16), after a four-byte file header.
-                    for (int offset = 4; offset < bytes.Length; offset += 5 + BitConverter.ToInt32(bytes, offset + 1))
-                    {
-                        if (bytes[offset] != 2)
-                            continue;
+            Assert.That(fonts.GetForSize("Figtree-Regular", 'a', 50), Is.SameAs(normal));
+            Assert.That(fonts.GetForSize("Figtree-Regular", 'a', 200), Is.SameAs(doubled));
+        }
 
-                        ushort height = BitConverter.ToUInt16(bytes, offset + 5);
-                        BitConverter.GetBytes((ushort)(height * 2)).CopyTo(bytes, offset + 5);
-                        break;
-                    }
-                }
+        [Test]
+        public void TestTrueTypeLowResolution()
+        {
+            using var glyphStore = new TrueTypeGlyphStore(trueTypeResourceStore, "Figtree-Regular") { LowResolutionTextures = true };
+            glyphStore.LoadFontAsync().GetAwaiter().GetResult();
 
-                return new MemoryStream(bytes);
-            }
+            Assert.That(glyphStore.GetTextureScale('a', 4), Is.EqualTo(0.5f));
+
+            using var full = new TrueTypeGlyphStore(trueTypeResourceStore, "Figtree-Regular");
+            full.LoadFontAsync().GetAwaiter().GetResult();
+
+            using var half = glyphStore.Get(glyphStore.GetTextureName('W', 1));
+            using var original = full.Get("Figtree-Regular/W");
+            Assert.That(half.Width, Is.EqualTo(original.Width / 2).Within(1));
+        }
+
+        [Test]
+        public void TestTrueTypeTextureNames()
+        {
+            using var glyphStore = new TrueTypeGlyphStore(trueTypeResourceStore, "Figtree-Regular");
+            glyphStore.LoadFontAsync().GetAwaiter().GetResult();
+
+            Assert.That(glyphStore.GetTextureName('a', 1), Is.EqualTo("Figtree-Regular/a"));
+            Assert.That(glyphStore.GetTextureName('a', 2), Is.EqualTo("Figtree-Regular/@2x/a"));
+
+            using var doubled = glyphStore.Get("Figtree-Regular/@2x/a");
+            using var otherFont = glyphStore.Get("Figtree-Bold/a");
+            using var malformed = glyphStore.Get("Figtree-Regular/@x/a");
+
+            Assert.That(doubled, Is.Not.Null);
+            Assert.That(otherFont, Is.Null);
+            Assert.That(malformed, Is.Null);
+        }
+
+        [Test]
+        public void TestCreateGlyphStorePrefersTrueType()
+        {
+            using var trueType = Game.CreateGlyphStore(trueTypeResourceStore, "Figtree-Regular");
+            using var bitmap = Game.CreateGlyphStore(fontResourceStore, "Roboto-Regular");
+
+            Assert.That(trueType, Is.InstanceOf<TrueTypeGlyphStore>());
+            Assert.That(bitmap, Is.InstanceOf<RawCachingGlyphStore>());
         }
 
         [Test]

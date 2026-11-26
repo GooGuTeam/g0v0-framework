@@ -36,7 +36,7 @@ namespace osu.Framework.IO.Stores
         /// A local cache to avoid string allocation overhead. Can be changed to (string,char)=>string if this ever becomes an issue,
         /// but as long as we directly inherit <see cref="TextureStore"/> this is a slight optimisation.
         /// </summary>
-        private readonly ConcurrentDictionary<(string, char, bool), ITexturedCharacterGlyph> namespacedGlyphCache = new ConcurrentDictionary<(string, char, bool), ITexturedCharacterGlyph>();
+        private readonly ConcurrentDictionary<(string, char, int), ITexturedCharacterGlyph> namespacedGlyphCache = new ConcurrentDictionary<(string, char, int), ITexturedCharacterGlyph>();
 
         // Cache the owner, not its resolution: nested stores can have different native pixel sizes.
         private readonly ConcurrentDictionary<(string, char), ITexturedGlyphLookupStore> nestedGlyphOwners = new ConcurrentDictionary<(string, char), ITexturedGlyphLookupStore>();
@@ -86,8 +86,8 @@ namespace osu.Framework.IO.Stores
         {
             if (store is IGlyphStore gs)
             {
-                if (gs is GlyphStore bitmapGlyphStore)
-                    bitmapGlyphStore.LowResolutionTextures = lowResolutionFonts;
+                if (gs is IMultiResolutionGlyphStore multiResolution)
+                    multiResolution.LowResolutionTextures = lowResolutionFonts;
 
                 if (gs is RawCachingGlyphStore raw && raw.CacheStorage == null)
                     raw.CacheStorage = cacheStorage;
@@ -148,7 +148,7 @@ namespace osu.Framework.IO.Stores
 
         public override void RemoveTextureStore(IResourceStore<TextureUpload> store)
         {
-            if (store is GlyphStore gs)
+            if (store is IGlyphStore gs)
                 glyphStores.Remove(gs);
 
             base.RemoveTextureStore(store);
@@ -166,8 +166,8 @@ namespace osu.Framework.IO.Stores
 
         internal ITexturedCharacterGlyph GetForSize(string fontName, char character, float fontSize)
         {
-            bool highDefinition = !lowResolutionFonts && fontSize > ScaleAdjust && character >= ' ' && character <= '~';
-            var key = (fontName, character, highDefinition);
+            int tier = getResolutionTier(fontSize);
+            var key = (fontName, character, tier);
 
             if (namespacedGlyphCache.TryGetValue(key, out var existing))
                 return existing;
@@ -179,8 +179,15 @@ namespace osu.Framework.IO.Stores
             {
                 if (store.FontName.EndsWith(fontName ?? string.Empty, StringComparison.Ordinal) && store.HasGlyph(character))
                 {
-                    float textureScale = (store as GlyphStore)?.GetTextureScale(character, highDefinition) ?? 1;
-                    string textureName = textureScale > 1 ? $"{store.FontName}/{GlyphStore.HIGH_DEFINITION_PREFIX}{character}" : $"{store.FontName}/{character}";
+                    float textureScale = 1;
+                    string textureName = $"{store.FontName}/{character}";
+
+                    if (store is IMultiResolutionGlyphStore multiResolution)
+                    {
+                        textureScale = multiResolution.GetTextureScale(character, tier);
+                        textureName = multiResolution.GetTextureName(character, tier);
+                    }
+
                     return namespacedGlyphCache[key] = new TexturedCharacterGlyph(store.Get(character).AsNonNull(), Get(textureName), 1 / ScaleAdjust,
                         textureScale);
                 }
@@ -198,6 +205,18 @@ namespace osu.Framework.IO.Stores
 
             nestedGlyphOwners[(fontName, character)] = null;
             return null;
+        }
+
+        /// <summary>
+        /// The texture resolution multiplier to request for text drawn at <paramref name="fontSize"/>.
+        /// Glyph textures are rendered for a size of <see cref="TextureStore.ScaleAdjust"/>; larger text gets 2x or 4x textures from stores that can provide them.
+        /// </summary>
+        private int getResolutionTier(float fontSize)
+        {
+            if (lowResolutionFonts || fontSize <= ScaleAdjust)
+                return 1;
+
+            return fontSize <= ScaleAdjust * 2 ? 2 : TrueTypeGlyphStore.MAX_TEXTURE_SCALE;
         }
 
         public Task<ITexturedCharacterGlyph> GetAsync(string fontName, char character) => Task.Run(() => Get(fontName, character));
