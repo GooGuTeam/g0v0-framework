@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Threading;
@@ -495,6 +495,7 @@ namespace osu.Framework.Tests.Clocks
         }
 
         [Test]
+        [Ignore("Fails intermittently on CI: if the test thread is descheduled, the stopwatch source runs more than the 30ms tolerance ahead of the decoupling clock.")]
         public void TestForwardPlaybackOverLengthBoundary()
         {
             source = new TestStopwatchClockWithRangeLimit

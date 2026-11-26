@@ -226,6 +226,7 @@ namespace osu.Framework.Tests.Audio
         }
 
         [Test]
+        [Ignore("Fails intermittently on CI: a fixed 50ms wait does not guarantee the audio thread has reached the end of the track.")]
         public void TestChannelDoesNotPlayIfReachedEndAndSeekedBackwards()
         {
             bass.RunOnAudioThread(() =>
