@@ -478,13 +478,15 @@ namespace osu.Framework.Graphics.Sprites
 
             try
             {
-                if (string.IsNullOrEmpty(displayedText))
+                string normalisedText = TextNormalisation.Normalise(displayedText);
+
+                if (string.IsNullOrEmpty(normalisedText))
                     return;
 
                 TextBuilder textBuilder = getTextBuilder();
 
                 textBuilder.Reset();
-                textBuilder.AddText(displayedText);
+                textBuilder.AddText(normalisedText);
                 textBounds = textBuilder.Bounds;
 
                 if (textBuilder is TruncatingTextBuilder truncatingTextBuilder)

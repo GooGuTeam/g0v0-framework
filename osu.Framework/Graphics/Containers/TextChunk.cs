@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -8,6 +8,7 @@ using System.Linq;
 using System.Text;
 using osu.Framework.Graphics.Sprites;
 using osu.Framework.Localisation;
+using osu.Framework.Text;
 
 namespace osu.Framework.Graphics.Containers
 {
@@ -33,6 +34,11 @@ namespace osu.Framework.Graphics.Containers
         protected override IEnumerable<Drawable> CreateDrawablesFor(TextFlowContainer textFlowContainer)
         {
             string currentContent = textFlowContainer.Localisation?.GetLocalisedString(text) ?? text.ToString();
+
+            // Normalise before splitting: a boundary may otherwise fall between a base character and its combining
+            // mark (for instance between a kana and its voiced sound mark), which no amount of per-word normalisation
+            // can undo afterwards.
+            currentContent = TextNormalisation.Normalise(currentContent);
 
             var drawables = new List<Drawable>();
 
