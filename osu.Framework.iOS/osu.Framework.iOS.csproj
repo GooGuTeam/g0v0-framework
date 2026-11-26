@@ -19,6 +19,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="runtimes\**\*" Pack="true" PackagePath="runtimes" />
+    <None Include="native\**\*" Pack="true" PackagePath="build\native" />
     <None Include="$(MSBuildThisFileDirectory)..\tools\AssemblyStripper.cs" Pack="true" PackagePath="build\tools\AssemblyStripper.cs" />
     <None Include="osu.Framework.iOS.Workarounds.targets" Pack="true" PackagePath="build\$(PackageId).targets" />
   </ItemGroup>

@@ -1,4 +1,10 @@
 <Project>
+  <ItemGroup>
+    <!-- FreeTypeSharp's static libfreetype.a references libpng, which iOS does not provide. These stubs make it link;
+         see native/freetype-png-stub/png_stubs.c. -->
+    <NativeReference Include="$(MSBuildThisFileDirectory)native\freetype-png-stub.xcframework" Kind="Static" SmartLink="false" />
+  </ItemGroup>
+
   <!-- Some transitive assemblies don't behave well with AOT, so we strip them.
        Importantly, this is done in such a way that the assembly's MVID is preserved to satisfy runtime requirements. -->
   <Target Name="OsuFrameworkIOSStripAssemblies" AfterTargets="ILLink" BeforeTargets="_AOTCompile">

@@ -64,3 +64,9 @@ The `recording` job in `.github/workflows/build-native.yml` (the reusable native
 The release job waits for native compilation, downloads and verifies hashes on Linux, packs native assets into the framework package and verifies package entries/hashes/PE architecture before the existing publication steps. The inspection script never loads native code. No publication has been triggered locally.
 
 Local validation covers compilation, MSBuild copying and static package inspection. Hosted workflow execution, code signing, FSE hardware behaviour and supported-device coverage remain unverified. Native binaries are unsigned.
+
+## FreeType PNG stubs (iOS)
+
+FreeTypeSharp's iOS `libfreetype.a` is built with PNG support but does not bundle libpng, and iOS has no system libpng, so apps failed to link (`Undefined symbols: _png_create_read_struct`, ...). `freetype-png-stub/png_stubs.c` defines those symbols: `png_create_read_struct` returns NULL, which FreeType treats as a failure for that one embedded colour bitmap glyph, and the rest trap. `TrueTypeGlyphStore` loads glyphs with `FT_LOAD_NO_BITMAP`, so that path is never taken.
+
+`freetype-png-stub/build.ps1` compiles it with the pinned Zig (no Apple SDK needed) into the static `osu.Framework.iOS/native/freetype-png-stub.xcframework` (ios-arm64 and ios-arm64-simulator, the slices FreeTypeSharp ships), which is committed. In-repo apps reference it from `osu.Framework.iOS.props`; the `g0v0.Framework.iOS` package carries it under `build/native/` and references it from its build targets. Remove all of this once FreeTypeSharp links libpng itself.
