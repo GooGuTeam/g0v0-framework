@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 # Link the C++ runtime statically, so the library does not depend on the Visual C++ redistributable or the system libstdc++.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-project(g0v0-image-codecs LANGUAGES C CXX)
+project(g0v0.Imaging LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_VISIBILITY_PRESET hidden)
@@ -45,7 +45,7 @@ foreach(source IN ITEMS
         message(FATAL_ERROR "Missing image codec submodule file: ${source}. Run git submodule update --init --recursive from the framework repository.")
     endif()
 endforeach()
-add_library(g0v0-image-codecs SHARED image_codecs.cpp)
+add_library(g0v0.Imaging SHARED image_codecs.cpp)
 include(simd-processing.cmake)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(BUILD_EXECUTABLE OFF CACHE BOOL "" FORCE)
@@ -53,22 +53,22 @@ set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 add_subdirectory(third_party/cpu_features EXCLUDE_FROM_ALL)
-target_sources(g0v0-image-codecs PRIVATE cpu_diagnostics.cpp)
-target_link_libraries(g0v0-image-codecs PRIVATE CpuFeatures::cpu_features)
+target_sources(g0v0.Imaging PRIVATE cpu_diagnostics.cpp)
+target_link_libraries(g0v0.Imaging PRIVATE CpuFeatures::cpu_features)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cpu_features/LICENSE" DESTINATION licences RENAME LICENCE-cpu_features)
-target_include_directories(g0v0-image-codecs PRIVATE "${WUFFS_SOURCE_DIR}/release/c" "${STB_SOURCE_DIR}")
+target_include_directories(g0v0.Imaging PRIVATE "${WUFFS_SOURCE_DIR}/release/c" "${STB_SOURCE_DIR}")
 
 if(MSVC)
-    target_link_options(g0v0-image-codecs PRIVATE
+    target_link_options(g0v0.Imaging PRIVATE
         $<$<CONFIG:Release,MinSizeRel>:/OPT:REF>
         $<$<CONFIG:Release,MinSizeRel>:/OPT:ICF>
     )
 elseif(APPLE)
-    target_link_options(g0v0-image-codecs PRIVATE
+    target_link_options(g0v0.Imaging PRIVATE
         $<$<CONFIG:Release,MinSizeRel>:-Wl,-dead_strip>
     )
 else()
-    target_link_options(g0v0-image-codecs PRIVATE
+    target_link_options(g0v0.Imaging PRIVATE
         $<$<CONFIG:Release,MinSizeRel>:-Wl,--gc-sections>
         $<$<CONFIG:Release,MinSizeRel>:-Wl,--exclude-libs,ALL>
         $<$<CONFIG:Release,MinSizeRel>:-Wl,--strip-all>
@@ -76,21 +76,21 @@ else()
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_options(g0v0-image-codecs PRIVATE -static-libstdc++ -static-libgcc)
+    target_link_options(g0v0.Imaging PRIVATE -static-libstdc++ -static-libgcc)
 endif()
 if(ANDROID)
     # Android 15+ devices may use 16 KB pages, and Android 16 requires libraries aligned for them.
-    target_link_options(g0v0-image-codecs PRIVATE "-Wl,-z,max-page-size=16384")
+    target_link_options(g0v0.Imaging PRIVATE "-Wl,-z,max-page-size=16384")
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    # iOS apps load dynamic libraries only from embedded frameworks; osu.Framework.iOS resolves @rpath/g0v0-image-codecs.framework.
-    set_target_properties(g0v0-image-codecs PROPERTIES
+    # iOS apps load dynamic libraries only from embedded frameworks; osu.Framework.iOS resolves @rpath/g0v0.Imaging.framework.
+    set_target_properties(g0v0.Imaging PROPERTIES
         FRAMEWORK TRUE
-        MACOSX_FRAMEWORK_IDENTIFIER sh.g0v0.image-codecs
+        MACOSX_FRAMEWORK_IDENTIFIER sh.g0v0.imaging
         MACOSX_FRAMEWORK_BUNDLE_VERSION 1
         MACOSX_FRAMEWORK_SHORT_VERSION_STRING 1.0
         INSTALL_NAME_DIR "@rpath")
 endif()
-install(TARGETS g0v0-image-codecs RUNTIME DESTINATION . LIBRARY DESTINATION . FRAMEWORK DESTINATION .)
+install(TARGETS g0v0.Imaging RUNTIME DESTINATION . LIBRARY DESTINATION . FRAMEWORK DESTINATION .)
 install(FILES "${WUFFS_SOURCE_DIR}/LICENSE-MIT" DESTINATION licences RENAME LICENCE-Wuffs-MIT)
 install(FILES "${STB_SOURCE_DIR}/LICENSE" DESTINATION licences RENAME LICENCE-stb)

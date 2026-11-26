@@ -8,9 +8,9 @@
     <ImageCodecsRid Condition="'$(ImageCodecsRid)' == '' and '$(_ImageCodecsDesktop)' == 'true' and $([MSBuild]::IsOSPlatform('Linux'))">linux-$(_ImageCodecsArchitecture)</ImageCodecsRid>
     <ImageCodecsRid Condition="'$(ImageCodecsRid)' == '' and '$(_ImageCodecsDesktop)' == 'true' and $([MSBuild]::IsOSPlatform('OSX'))">osx-$(_ImageCodecsArchitecture)</ImageCodecsRid>
     <ImageCodecsDirectory Condition="'$(ImageCodecsDirectory)' == '' and '$(ImageCodecsRid)' != ''">$(MSBuildThisFileDirectory)artifacts/$(ImageCodecsRid)/image-codecs</ImageCodecsDirectory>
-    <_ImageCodecsFile Condition="$([System.String]::Copy('$(ImageCodecsRid)').StartsWith('win-'))">g0v0-image-codecs.dll</_ImageCodecsFile>
-    <_ImageCodecsFile Condition="$([System.String]::Copy('$(ImageCodecsRid)').StartsWith('linux-'))">libg0v0-image-codecs.so</_ImageCodecsFile>
-    <_ImageCodecsFile Condition="$([System.String]::Copy('$(ImageCodecsRid)').StartsWith('osx-'))">libg0v0-image-codecs.dylib</_ImageCodecsFile>
+    <_ImageCodecsFile Condition="$([System.String]::Copy('$(ImageCodecsRid)').StartsWith('win-'))">g0v0.Imaging.dll</_ImageCodecsFile>
+    <_ImageCodecsFile Condition="$([System.String]::Copy('$(ImageCodecsRid)').StartsWith('linux-'))">libg0v0.Imaging.so</_ImageCodecsFile>
+    <_ImageCodecsFile Condition="$([System.String]::Copy('$(ImageCodecsRid)').StartsWith('osx-'))">libg0v0.Imaging.dylib</_ImageCodecsFile>
     <!-- The library is compiled with CMake when it is missing or older than its sources. Only the build machine's own platform can be
          compiled this way; other RIDs need a prebuilt library in ImageCodecsDirectory. Pass -p:BuildImageCodecs=false to require a prebuilt one. -->
     <BuildImageCodecs Condition="'$(BuildImageCodecs)' == '' and '$(ImageCodecsRid)' == 'win-$(_ImageCodecsArchitecture)' and $([MSBuild]::IsOSPlatform('Windows'))">true</BuildImageCodecs>
@@ -48,18 +48,18 @@
     <_ImageCodecsArtifacts>$(MSBuildThisFileDirectory)artifacts/</_ImageCodecsArtifacts>
   </PropertyGroup>
   <ItemGroup Condition="'$(PackImageCodecs)' == 'true'">
-    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)win-x64/image-codecs/g0v0-image-codecs.dll" PackagePath="runtimes/win-x64/native/" />
-    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)win-arm64/image-codecs/g0v0-image-codecs.dll" PackagePath="runtimes/win-arm64/native/" />
-    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)linux-x64/image-codecs/libg0v0-image-codecs.so" PackagePath="runtimes/linux-x64/native/" />
-    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)linux-arm64/image-codecs/libg0v0-image-codecs.so" PackagePath="runtimes/linux-arm64/native/" />
-    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)osx-x64/image-codecs/libg0v0-image-codecs.dylib" PackagePath="runtimes/osx-x64/native/" />
-    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)osx-arm64/image-codecs/libg0v0-image-codecs.dylib" PackagePath="runtimes/osx-arm64/native/" />
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)win-x64/image-codecs/g0v0.Imaging.dll" PackagePath="runtimes/win-x64/native/" />
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)win-arm64/image-codecs/g0v0.Imaging.dll" PackagePath="runtimes/win-arm64/native/" />
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)linux-x64/image-codecs/libg0v0.Imaging.so" PackagePath="runtimes/linux-x64/native/" />
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)linux-arm64/image-codecs/libg0v0.Imaging.so" PackagePath="runtimes/linux-arm64/native/" />
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)osx-x64/image-codecs/libg0v0.Imaging.dylib" PackagePath="runtimes/osx-x64/native/" />
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)osx-arm64/image-codecs/libg0v0.Imaging.dylib" PackagePath="runtimes/osx-arm64/native/" />
     <!-- Also keeps Android from falling back to the glibc linux-arm64 library through the RID graph. -->
-    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)android-arm64/image-codecs/libg0v0-image-codecs.so" PackagePath="runtimes/android-arm64/native/" />
-    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)ios/image-codecs/g0v0-image-codecs.xcframework/Info.plist" PackagePath="runtimes/ios/native/g0v0-image-codecs.xcframework/" />
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)android-arm64/image-codecs/libg0v0.Imaging.so" PackagePath="runtimes/android-arm64/native/" />
+    <_ImageCodecsPackageFile Include="$(_ImageCodecsArtifacts)ios/image-codecs/g0v0.Imaging.xcframework/Info.plist" PackagePath="runtimes/ios/native/g0v0.Imaging.xcframework/" />
     <!-- The iOS framework is shipped the way ppy.SDL3-CS ships SDL3.xcframework; iOS app builds embed it. -->
-    <None Include="$(_ImageCodecsArtifacts)ios/image-codecs/g0v0-image-codecs.xcframework/**" Exclude="$(_ImageCodecsArtifacts)ios/image-codecs/g0v0-image-codecs.xcframework/Info.plist"
-          Pack="true" PackagePath="runtimes/ios/native/g0v0-image-codecs.xcframework/" Visible="false" />
+    <None Include="$(_ImageCodecsArtifacts)ios/image-codecs/g0v0.Imaging.xcframework/**" Exclude="$(_ImageCodecsArtifacts)ios/image-codecs/g0v0.Imaging.xcframework/Info.plist"
+          Pack="true" PackagePath="runtimes/ios/native/g0v0.Imaging.xcframework/" Visible="false" />
     <None Include="@(_ImageCodecsPackageFile)" Pack="true" Visible="false" />
     <None Include="$(_ImageCodecsArtifacts)linux-x64/image-codecs/licences/LICENCE-*" Pack="true" PackagePath="licences/" Visible="false" />
   </ItemGroup>

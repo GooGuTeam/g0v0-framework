@@ -45,7 +45,7 @@ namespace osu.Framework.Audio.Callbacks
                 // Only load an explicit absolute path or the deployed application-local library.
                 string? path = Environment.GetEnvironmentVariable(@"G0V0_WASAPI_CAPTURE_LIBRARY");
                 if (string.IsNullOrEmpty(path))
-                    path = Path.Combine(AppContext.BaseDirectory, @"g0v0-wasapi-capture.dll");
+                    path = Path.Combine(AppContext.BaseDirectory, @"g0v0.Audio.dll");
 
                 if (context == IntPtr.Zero)
                 {

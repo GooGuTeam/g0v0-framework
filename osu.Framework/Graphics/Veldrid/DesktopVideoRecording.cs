@@ -359,18 +359,18 @@ namespace osu.Framework.Graphics.Veldrid
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void PacketCallback(IntPtr context, uint stream, IntPtr data, uint size, long pts, long dts, long duration, uint flags);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_stream_open_configured(IntPtr device, uint width, uint height, uint rate, uint channels, uint fps, uint bitrate, uint profile, PacketCallback callback,
                                                             IntPtr context, out IntPtr recorder);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vk_stream_open_configured(IntPtr instance, IntPtr physical, IntPtr device, uint family, uint width, uint height, uint rate, uint channels, uint fps, uint bitrate,
                                                                uint profile, uint outputWidth, uint outputHeight, PacketCallback callback, IntPtr context, out IntPtr recorder);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_stream_keyframe(IntPtr recorder);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vk_stream_keyframe(IntPtr recorder);
 
         private void writeAudioUntil(IntPtr recorder, MixerAudioCapture capture, float[] buffer, long endSample)
@@ -386,41 +386,41 @@ namespace osu.Framework.Graphics.Veldrid
             }
         }
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
         private static extern int g0_vk_open_configured(IntPtr instance, IntPtr physical, IntPtr device, uint family, uint width, uint height, string path, uint rate, uint channels, uint fps,
                                                         uint bitrate, uint profile, uint outputWidth, uint outputHeight, out IntPtr recorder);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vk_prepare(IntPtr recorder, ulong image, out IntPtr command, out IntPtr next, out ulong fence);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vk_encode(IntPtr recorder, long time);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vk_audio(IntPtr recorder, [In] float[] pcm, uint frames, long position);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vk_close(IntPtr recorder);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern void g0_vk_stats(IntPtr recorder, out ulong accepted, out ulong pool, out ulong cadence);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_prepare(IntPtr device);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
         private static extern int g0_record_open_configured(IntPtr device, string path, uint width, uint height, uint rate, uint channels, uint fps, uint bitrate, uint profile, out IntPtr recorder);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_frame(IntPtr recorder, IntPtr texture, long timestamp);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_audio(IntPtr recorder, [In] float[] pcm, uint frames, long position);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_close(IntPtr recorder);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern void g0_record_stats(IntPtr recorder, out ulong accepted, out ulong poolDrops, out ulong cadenceDrops);
     }
 }

@@ -6,7 +6,7 @@ When deployed, this bridge supplies the native WASAPI callback while retaining t
 
 ```powershell
 ../build-recording.ps1 -Zig C:/path/to/zig.exe -VulkanHeaders C:/path/to/Vulkan-Headers -DeployDirectory C:/path/to/client/output
-$env:G0V0_WASAPI_CAPTURE_LIBRARY = (Resolve-Path ../artifacts/win-x64/g0v0-wasapi-capture.dll).Path
+$env:G0V0_WASAPI_CAPTURE_LIBRARY = (Resolve-Path ../artifacts/win-x64/g0v0.Audio.dll).Path
 ```
 
 Start a locally built framework/game with WASAPI enabled. The application-local DLL is selected by default when deployed; the optional environment variable overrides it with an absolute path to a trusted DLL. Invalid optional libraries preserve the normal playback bridge, but WASAPI recording audio is unavailable. The old `build-win.ps1` executes probes and must not be used for build-only validation.

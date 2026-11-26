@@ -92,7 +92,7 @@ namespace osu.Framework.iOS
             NativeLibrary.SetDllImportResolver(typeof(SDL3).Assembly, (_, assembly, path) => NativeLibrary.Load("@rpath/SDL3.framework/SDL3", assembly, path));
             // osu.Framework's image codecs ship as an embedded framework; its other imports (system libraries) resolve as usual.
             NativeLibrary.SetDllImportResolver(typeof(Game).Assembly, (name, assembly, path) =>
-                name == "g0v0-image-codecs" ? NativeLibrary.Load("@rpath/g0v0-image-codecs.framework/g0v0-image-codecs", assembly, path) : IntPtr.Zero);
+                name == "g0v0.Imaging" ? NativeLibrary.Load("@rpath/g0v0.Imaging.framework/g0v0.Imaging", assembly, path) : IntPtr.Zero);
         }
 
         private class OutputVolumeObserver : NSObject

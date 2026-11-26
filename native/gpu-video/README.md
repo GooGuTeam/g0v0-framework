@@ -12,8 +12,8 @@ Use Zig 0.14.1 and Vulkan headers. Close the client before deployment.
 
 The script compiles both libraries with `-Wall -Wextra -Werror` and runs no probes or tests. Outputs:
 
-- `../artifacts/win-x64/g0v0-gpu-video.dll`
-- `../artifacts/win-x64/g0v0-wasapi-capture.dll`
+- `../artifacts/win-x64/g0v0.MediaFoundation.dll`
+- `../artifacts/win-x64/g0v0.Audio.dll`
 
 See [native integration](../README.md) for MSBuild, toolchain pinning and CI/CD packaging.
 

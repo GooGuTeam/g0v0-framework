@@ -12,15 +12,15 @@ import zipfile
 package = Path(sys.argv[1])
 artifacts = Path(sys.argv[2])
 libraries = {
-    "win-x64": ("g0v0-image-codecs.dll", b"MZ"),
-    "win-arm64": ("g0v0-image-codecs.dll", b"MZ"),
-    "linux-x64": ("libg0v0-image-codecs.so", b"\x7fELF"),
-    "linux-arm64": ("libg0v0-image-codecs.so", b"\x7fELF"),
-    "android-arm64": ("libg0v0-image-codecs.so", b"\x7fELF"),
-    "osx-x64": ("libg0v0-image-codecs.dylib", b"\xcf\xfa\xed\xfe"),
-    "osx-arm64": ("libg0v0-image-codecs.dylib", b"\xcf\xfa\xed\xfe"),
+    "win-x64": ("g0v0.Imaging.dll", b"MZ"),
+    "win-arm64": ("g0v0.Imaging.dll", b"MZ"),
+    "linux-x64": ("libg0v0.Imaging.so", b"\x7fELF"),
+    "linux-arm64": ("libg0v0.Imaging.so", b"\x7fELF"),
+    "android-arm64": ("libg0v0.Imaging.so", b"\x7fELF"),
+    "osx-x64": ("libg0v0.Imaging.dylib", b"\xcf\xfa\xed\xfe"),
+    "osx-arm64": ("libg0v0.Imaging.dylib", b"\xcf\xfa\xed\xfe"),
 }
-xcframework = "g0v0-image-codecs.xcframework"
+xcframework = "g0v0.Imaging.xcframework"
 
 
 def check_same(entry, source):
@@ -42,7 +42,7 @@ with zipfile.ZipFile(package) as archive:
         if path.is_file():
             entry = f"runtimes/ios/native/{xcframework}/{path.relative_to(source).as_posix()}"
             check_same(entry, path)
-            if path.parent.name == "g0v0-image-codecs.framework" and path.name == "g0v0-image-codecs":
+            if path.parent.name == "g0v0.Imaging.framework" and path.name == "g0v0.Imaging":
                 if not archive.read(entry).startswith(b"\xcf\xfa\xed\xfe"):
                     raise SystemExit(f"Unexpected binary format: {entry}")
                 binaries += 1

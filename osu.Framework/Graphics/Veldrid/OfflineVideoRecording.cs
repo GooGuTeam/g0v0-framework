@@ -171,26 +171,26 @@ namespace osu.Framework.Graphics.Veldrid
                 throw new InvalidOperationException(@"Offline encoding must run on its creating export thread.");
         }
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_prepare(IntPtr device);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
         private static extern int g0_record_open_configured(IntPtr device, string path, uint width, uint height, uint rate, uint channels,
                                                             uint fps, uint bitrate, uint profile, out IntPtr recorder);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_offline_frame(IntPtr recorder, IntPtr texture, long index);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_offline_flush(IntPtr recorder);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_audio(IntPtr recorder, [In] float[] pcm, uint frames, long position);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern void g0_record_stats(IntPtr recorder, out ulong accepted, out ulong poolDrops, out ulong cadenceDrops);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_record_close(IntPtr recorder);
     }
 }

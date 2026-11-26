@@ -2,7 +2,7 @@
 
 ## Image codecs
 
-`image-codecs/` builds `g0v0-image-codecs`, which decodes and resizes images for `osu.Framework.Imaging` (Wuffs, stb_image_write, Simd and cpu_features, all as submodules under `image-codecs/third_party`). Initialise them once:
+`image-codecs/` builds `g0v0.Imaging`, which decodes and resizes images for `osu.Framework.Imaging` (Wuffs, stb_image_write, Simd and cpu_features, all as submodules under `image-codecs/third_party`). Initialise them once:
 
 ```bash
 git submodule update --init --recursive
@@ -22,9 +22,9 @@ The library links the C++ runtime statically (no Visual C++ redistributable or s
 
 Android builds are linked for 16 KB pages, which Android 16 requires.
 
-iOS loads the library as an embedded framework. CI builds `g0v0-image-codecs.framework` for devices and Apple silicon simulators (both arm64) and combines them into `artifacts/ios/image-codecs/g0v0-image-codecs.xcframework`. `osu.Framework.iOS` resolves it at `@rpath/g0v0-image-codecs.framework`, and source iOS builds embed it when it is present there.
+iOS loads the library as an embedded framework. CI builds `g0v0.Imaging.framework` for devices and Apple silicon simulators (both arm64) and combines them into `artifacts/ios/image-codecs/g0v0.Imaging.xcframework`. `osu.Framework.iOS` resolves it at `@rpath/g0v0.Imaging.framework`, and source iOS builds embed it when it is present there.
 
-The `g0v0.Framework` package carries the library under `runtimes/<rid>/native/` for win-x64, win-arm64, linux-x64, linux-arm64, osx-x64, osx-arm64 and android-arm64, and as `runtimes/ios/native/g0v0-image-codecs.xcframework`, with the third-party licences under `licences/`. The Android library also stops NuGet from falling back to the glibc linux-arm64 one, which the Android RID graph would otherwise select. The image codec jobs in `.github/workflows/build-native.yml` build each platform on its own runner; the release workflow downloads them to `artifacts/<rid>/image-codecs/` (`artifacts/ios/image-codecs/` for iOS) and packs with `-p:PackImageCodecs=true -p:BuildImageCodecs=false`, then checks the package with `verify-image-codecs-package.py`. Packing without `PackImageCodecs` fails, so a package never ships without the decoder.
+The `g0v0.Framework` package carries the library under `runtimes/<rid>/native/` for win-x64, win-arm64, linux-x64, linux-arm64, osx-x64, osx-arm64 and android-arm64, and as `runtimes/ios/native/g0v0.Imaging.xcframework`, with the third-party licences under `licences/`. The Android library also stops NuGet from falling back to the glibc linux-arm64 one, which the Android RID graph would otherwise select. The image codec jobs in `.github/workflows/build-native.yml` build each platform on its own runner; the release workflow downloads them to `artifacts/<rid>/image-codecs/` (`artifacts/ios/image-codecs/` for iOS) and packs with `-p:PackImageCodecs=true -p:BuildImageCodecs=false`, then checks the package with `verify-image-codecs-package.py`. Packing without `PackImageCodecs` fails, so a package never ships without the decoder.
 
 Releases also publish `g0v0.Framework.Android` and `g0v0.Framework.iOS` at the same version. They are packed on Windows and on the Xcode runner, since each needs its platform workload. Other Android ABIs and Intel simulators have no image codec library.
 
@@ -43,7 +43,7 @@ The recording libraries target **Windows x64**. Linux/macOS offline export uses 
 
 Zig 0.14.1 and Vulkan-Headers 1.4.309 are pinned in `recording-toolchain.json`; downloads are checked against SHA-256 before extraction. Downloading is opt-in. The compiler explicitly targets `x86_64-windows-gnu` with optimisation and warnings-as-errors. Neither probes nor tests are built or executed.
 
-Outputs are `native/artifacts/win-x64/g0v0-gpu-video.dll`, `g0v0-wasapi-capture.dll` and `SHA256SUMS`. Compilation uses a temporary staging directory and copies DLLs only after both libraries compile. Toolchains and outputs are ignored by Git. Use `-OutputDirectory` to change the destination or `-DeployDirectory` to explicitly copy and hash-check DLLs into an existing, unlocked client output directory.
+Outputs are `native/artifacts/win-x64/g0v0.MediaFoundation.dll`, `g0v0.Audio.dll` and `SHA256SUMS`. Compilation uses a temporary staging directory and copies DLLs only after both libraries compile. Toolchains and outputs are ignored by Git. Use `-OutputDirectory` to change the destination or `-DeployDirectory` to explicitly copy and hash-check DLLs into an existing, unlocked client output directory.
 
 ### MSBuild
 

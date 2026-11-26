@@ -30,15 +30,15 @@
          see native/freetype-png-stub/png_stubs.c. -->
     <NativeReference Include="$(MSBuildThisFileDirectory)osu.Framework.iOS\native\freetype-png-stub.xcframework" Kind="Static" SmartLink="false" />
     <!-- The image codec framework from build-native.yml, downloaded to native/artifacts/ios/image-codecs. The g0v0.Framework package carries it itself. -->
-    <NativeReference Include="$(MSBuildThisFileDirectory)native\artifacts\ios\image-codecs\g0v0-image-codecs.xcframework" Kind="Framework" SmartLink="false"
-                     Condition="Exists('$(MSBuildThisFileDirectory)native\artifacts\ios\image-codecs\g0v0-image-codecs.xcframework')" />
+    <NativeReference Include="$(MSBuildThisFileDirectory)native\artifacts\ios\image-codecs\g0v0.Imaging.xcframework" Kind="Framework" SmartLink="false"
+                     Condition="Exists('$(MSBuildThisFileDirectory)native\artifacts\ios\image-codecs\g0v0.Imaging.xcframework')" />
   </ItemGroup>
 
   <!-- osu.Framework compiles the image codec library for the build machine and copies it to referencing projects.
        That desktop library cannot be loaded on iOS, and the iOS SDK fails to re-identify it, so it is left out of the app. -->
   <Target Name="G0V0RemoveDesktopImageCodecs" AfterTargets="ComputeResolvedFilesToPublishList">
     <ItemGroup>
-      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Filename)' == 'libg0v0-image-codecs' or '%(Filename)' == 'g0v0-image-codecs'" />
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Filename)' == 'libg0v0.Imaging' or '%(Filename)' == 'g0v0.Imaging'" />
     </ItemGroup>
   </Target>
 

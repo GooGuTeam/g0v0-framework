@@ -4,6 +4,7 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
+using osu.Framework.Imaging;
 
 namespace osu.Framework.Platform
 {
@@ -29,7 +30,7 @@ namespace osu.Framework.Platform
             }
         }
 
-        [DllImport("g0v0-image-codecs", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        [DllImport(NativeImageCodec.LIBRARY, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         private static extern int g0_cpu_diagnostics([Out] byte[] buffer, nuint capacity);
     }
 }

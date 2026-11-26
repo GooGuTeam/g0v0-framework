@@ -12,7 +12,7 @@ import zipfile
 package = Path(sys.argv[1])
 source = Path(sys.argv[2])
 with zipfile.ZipFile(package) as archive:
-    for name in ("g0v0-gpu-video.dll", "g0v0-wasapi-capture.dll"):
+    for name in ("g0v0.MediaFoundation.dll", "g0v0.Audio.dll"):
         data = archive.read(f"runtimes/win-x64/native/{name}")
         if hashlib.sha256(data).digest() != hashlib.sha256((source / name).read_bytes()).digest():
             raise SystemExit(f"Packaged binary differs from native artifact: {name}")

@@ -96,9 +96,9 @@ jobs:
           done
           mkdir -p native/artifacts/ios/image-codecs
           xcodebuild -create-xcframework \
-            -framework native/artifacts/obj/install-iphoneos/g0v0-image-codecs.framework \
-            -framework native/artifacts/obj/install-iphonesimulator/g0v0-image-codecs.framework \
-            -output native/artifacts/ios/image-codecs/g0v0-image-codecs.xcframework
+            -framework native/artifacts/obj/install-iphoneos/g0v0.Imaging.framework \
+            -framework native/artifacts/obj/install-iphonesimulator/g0v0.Imaging.framework \
+            -output native/artifacts/ios/image-codecs/g0v0.Imaging.xcframework
           cp -R native/artifacts/obj/install-iphoneos/licences native/artifacts/ios/image-codecs/
 
       - name: Upload library and licences

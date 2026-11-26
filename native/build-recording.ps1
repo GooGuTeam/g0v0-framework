@@ -62,7 +62,7 @@ try {
         -fvisibility=hidden -fvisibility-inlines-hidden -ffunction-sections -fdata-sections `
         -Wall -Wextra -Werror -shared `
         (Join-Path $video 'vulkan_recording.cpp') -I $VulkanHeaders `
-        -o (Join-Path $stage 'g0v0-gpu-video.dll') `
+        -o (Join-Path $stage 'g0v0.MediaFoundation.dll') `
         '-Wl,--gc-sections' '-Wl,-s' `
         -ld3d11 -ldxgi -lmfplat -lmfreadwrite -lmfuuid -lole32 -levr
     if ($LASTEXITCODE -ne 0) { throw 'GPU recording library compilation failed.' }
@@ -70,14 +70,14 @@ try {
     & $Zig cc -target x86_64-windows-gnu -std=c11 -O2 -DNDEBUG -fno-sanitize=undefined -fno-stack-protector `
         -fvisibility=hidden -ffunction-sections -fdata-sections `
         -Wall -Wextra -Werror -shared `
-        (Join-Path $audio 'capture.c') -o (Join-Path $stage 'g0v0-wasapi-capture.dll') `
+        (Join-Path $audio 'capture.c') -o (Join-Path $stage 'g0v0.Audio.dll') `
         '-Wl,--gc-sections' '-Wl,-s'
     if ($LASTEXITCODE -ne 0) { throw 'WASAPI capture library compilation failed.' }
 
-    foreach ($name in @('g0v0-gpu-video.dll', 'g0v0-wasapi-capture.dll')) {
+    foreach ($name in @('g0v0.MediaFoundation.dll', 'g0v0.Audio.dll')) {
         Copy-Item -LiteralPath (Join-Path $stage $name) -Destination (Join-Path $OutputDirectory $name) -Force
     }
-    $hashes = foreach ($name in @('g0v0-gpu-video.dll', 'g0v0-wasapi-capture.dll')) {
+    $hashes = foreach ($name in @('g0v0.MediaFoundation.dll', 'g0v0.Audio.dll')) {
         $hash = (Get-FileHash -LiteralPath (Join-Path $OutputDirectory $name) -Algorithm SHA256).Hash.ToLowerInvariant()
         "$hash  $name"
     }
@@ -93,7 +93,7 @@ if ($DeployDirectory) {
     if (-not (Test-Path -LiteralPath $destination -PathType Container)) {
         throw 'DeployDirectory must be an existing client output directory.'
     }
-    foreach ($name in @('g0v0-gpu-video.dll', 'g0v0-wasapi-capture.dll')) {
+    foreach ($name in @('g0v0.MediaFoundation.dll', 'g0v0.Audio.dll')) {
         $library = Join-Path $OutputDirectory $name
         $target = Join-Path $destination $name
         try {

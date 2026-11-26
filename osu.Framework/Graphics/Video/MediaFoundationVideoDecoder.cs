@@ -400,17 +400,17 @@ namespace osu.Framework.Graphics.Video
             public int Hardware;
         }
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vdec_open(delegate* unmanaged[Cdecl]<IntPtr, long, byte*, int, int> read, IntPtr context, long length, int hardware, out IntPtr decoder,
                                                out DecoderInfo info);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vdec_read(IntPtr decoder, IntPtr y, IntPtr u, IntPtr v, int capacityWidth, int capacityHeight, out long time, ref DecoderInfo info);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vdec_seek(IntPtr decoder, long time);
 
-        [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(MediaFoundationLibrary.NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern void g0_vdec_close(IntPtr decoder);
     }
 }

@@ -9,7 +9,7 @@ namespace osu.Framework.Imaging
 {
     internal static unsafe class NativeImageCodec
     {
-        private const string library = "g0v0-image-codecs";
+        internal const string LIBRARY = "g0v0.Imaging";
         internal const int MAXIMUM_BYTES = 256 * 1024 * 1024;
 
         static NativeImageCodec()
@@ -78,20 +78,20 @@ namespace osu.Framework.Imaging
             }
         }
 
-        [DllImport(library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        [DllImport(LIBRARY, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         private static extern int g0_image_resize(byte* input, nuint inputLength, int width, int height,
                                                   byte* output, nuint outputLength, int newWidth, int newHeight, int method);
 
-        [DllImport(library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        [DllImport(LIBRARY, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         private static extern uint g0_image_abi();
 
-        [DllImport(library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        [DllImport(LIBRARY, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         private static extern int g0_image_decode(byte* input, nuint length, out IntPtr pixels, out int width, out int height);
 
-        [DllImport(library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        [DllImport(LIBRARY, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         private static extern int g0_image_encode(byte* pixels, nuint length, int width, int height, int format, int quality, out IntPtr output, out nuint outputLength);
 
-        [DllImport(library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        [DllImport(LIBRARY, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         private static extern void g0_image_free(IntPtr pointer);
     }
 }
