@@ -63,7 +63,7 @@ try {
         -Wall -Wextra -Werror -shared `
         (Join-Path $video 'vulkan_recording.cpp') -I $VulkanHeaders `
         -o (Join-Path $stage 'g0v0-gpu-video.dll') `
-        -Wl,--gc-sections -Wl,-s `
+        '-Wl,--gc-sections' '-Wl,-s' `
         -ld3d11 -ldxgi -lmfplat -lmfreadwrite -lmfuuid -lole32 -levr
     if ($LASTEXITCODE -ne 0) { throw 'GPU recording library compilation failed.' }
 
@@ -71,7 +71,7 @@ try {
         -fvisibility=hidden -ffunction-sections -fdata-sections `
         -Wall -Wextra -Werror -shared `
         (Join-Path $audio 'capture.c') -o (Join-Path $stage 'g0v0-wasapi-capture.dll') `
-        -Wl,--gc-sections -Wl,-s
+        '-Wl,--gc-sections' '-Wl,-s'
     if ($LASTEXITCODE -ne 0) { throw 'WASAPI capture library compilation failed.' }
 
     foreach ($name in @('g0v0-gpu-video.dll', 'g0v0-wasapi-capture.dll')) {
