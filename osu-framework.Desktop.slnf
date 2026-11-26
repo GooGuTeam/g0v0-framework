@@ -1,6 +1,6 @@
 {
   "solution": {
-    "path": "osu-framework.sln",
+    "path": "osu-framework.slnx",
     "projects": [
       "osu.Framework.Benchmarks\\osu.Framework.Benchmarks.csproj",
       "osu.Framework.NativeLibs\\osu.Framework.NativeLibs.csproj",

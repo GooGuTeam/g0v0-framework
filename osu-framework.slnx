@@ -1,0 +1,50 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".config/dotnet-tools.json" />
+    <File Path=".editorconfig" />
+    <File Path="Directory.Build.props" />
+    <File Path="global.json" />
+    <File Path="osu-framework.slnx.DotSettings" />
+    <File Path="osu.Framework.Android.props" />
+    <File Path="osu.Framework.iOS.props" />
+  </Folder>
+  <Folder Name="/Solution Items/CodeAnalysis/">
+    <File Path="CodeAnalysis/BannedSymbols.txt" />
+    <File Path="CodeAnalysis/osu-framework.globalconfig" />
+  </Folder>
+  <Folder Name="/Templates/">
+    <Project Path="osu.Framework.Templates/osu.Framework.Templates.csproj" />
+  </Folder>
+  <Folder Name="/Templates/Empty/">
+    <Project Path="osu.Framework.Templates/templates/template-empty/TemplateGame.Desktop/TemplateGame.Desktop.csproj" />
+    <Project Path="osu.Framework.Templates/templates/template-empty/TemplateGame.Game.Tests/TemplateGame.Game.Tests.csproj" />
+    <Project Path="osu.Framework.Templates/templates/template-empty/TemplateGame.Game/TemplateGame.Game.csproj" />
+    <Project Path="osu.Framework.Templates/templates/template-empty/TemplateGame.iOS/TemplateGame.iOS.csproj" />
+    <Project Path="osu.Framework.Templates/templates/template-empty/TemplateGame.Resources/TemplateGame.Resources.csproj" />
+  </Folder>
+  <Folder Name="/Templates/FlappyDon/">
+    <Project Path="osu.Framework.Templates/templates/template-flappy/FlappyDon.Desktop/FlappyDon.Desktop.csproj" />
+    <Project Path="osu.Framework.Templates/templates/template-flappy/FlappyDon.Game.Tests/FlappyDon.Game.Tests.csproj" />
+    <Project Path="osu.Framework.Templates/templates/template-flappy/FlappyDon.Game/FlappyDon.Game.csproj" />
+    <Project Path="osu.Framework.Templates/templates/template-flappy/FlappyDon.iOS/FlappyDon.iOS.csproj" />
+    <Project Path="osu.Framework.Templates/templates/template-flappy/FlappyDon.Resources/FlappyDon.Resources.csproj" />
+  </Folder>
+  <Project Path="osu.Framework.Android/osu.Framework.Android.csproj" />
+  <Project Path="osu.Framework.Benchmarks/osu.Framework.Benchmarks.csproj" />
+  <Project Path="osu.Framework.iOS/osu.Framework.iOS.csproj" />
+  <Project Path="osu.Framework.NativeLibs/osu.Framework.NativeLibs.csproj" />
+  <Project Path="osu.Framework.SourceGeneration.Tests/osu.Framework.SourceGeneration.Tests.csproj" />
+  <Project Path="osu.Framework.SourceGeneration/osu.Framework.SourceGeneration.csproj" />
+  <Project Path="osu.Framework.Tests.Android/osu.Framework.Tests.Android.csproj">
+    <Deploy />
+  </Project>
+  <Project Path="osu.Framework.Tests.iOS/osu.Framework.Tests.iOS.csproj" />
+  <Project Path="osu.Framework.Tests/osu.Framework.Tests.csproj" />
+  <Project Path="osu.Framework/osu.Framework.csproj" />
+  <Project Path="SampleGame.Android/SampleGame.Android.csproj">
+    <Deploy />
+  </Project>
+  <Project Path="SampleGame.Desktop/SampleGame.Desktop.csproj" />
+  <Project Path="SampleGame.iOS/SampleGame.iOS.csproj" />
+  <Project Path="SampleGame/SampleGame.csproj" />
+</Solution>

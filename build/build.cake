@@ -18,7 +18,7 @@ var rootDirectory = new DirectoryPath("..");
 var tempDirectory = new DirectoryPath("temp");
 var artifactsDirectory = rootDirectory.Combine("artifacts");
 
-var sln = rootDirectory.CombineWithFilePath("osu-framework.sln");
+var sln = rootDirectory.CombineWithFilePath("osu-framework.slnx");
 var desktopSlnf = rootDirectory.CombineWithFilePath("osu-framework.Desktop.slnf");
 var frameworkProject = rootDirectory.CombineWithFilePath("osu.Framework/osu.Framework.csproj");
 var iosFrameworkProject = rootDirectory.CombineWithFilePath("osu.Framework.iOS/osu.Framework.iOS.csproj");

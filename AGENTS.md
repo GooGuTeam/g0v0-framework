@@ -44,7 +44,7 @@ dotnet test osu.Framework.Tests/bin/Debug/**/osu.Framework.Tests.dll --no-build
 dotnet test osu.Framework.Tests/bin/Debug/**/osu.Framework.Tests.dll --no-build --filter "FullyQualifiedName~TestSceneName"
 ```
 
-- 方案过滤器：`osu-framework.Desktop.slnf`（桌面 + 测试）、`osu-framework.Android.slnf`、`osu-framework.iOS.slnf`。**不要直接构建 `osu-framework.sln`**。
+- 方案过滤器：`osu-framework.Desktop.slnf`（桌面 + 测试）、`osu-framework.Android.slnf`、`osu-framework.iOS.slnf`。**不要直接构建 `osu-framework.slnx`**（解决方案已于 2026-11-26 从 `.sln` 迁到 `.slnx`，需要 .NET SDK 9.0.200+ / VS 17.13+ / Rider 2024.3+）。
 - `bin/`、`obj/` 已在 `.gitignore` 中，不要提交。
 
 ---

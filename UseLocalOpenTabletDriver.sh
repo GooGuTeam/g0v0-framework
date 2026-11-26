@@ -6,7 +6,7 @@
 # https://github.com/ppy/osu-framework/wiki/Testing-local-framework-checkout-with-other-projects
 
 FRAMEWORK_CSPROJ="osu.Framework/osu.Framework.csproj"
-SLN="osu-framework.sln"
+SLN="osu-framework.slnx"
 
 dotnet remove $FRAMEWORK_CSPROJ reference OpenTabletDriver
 

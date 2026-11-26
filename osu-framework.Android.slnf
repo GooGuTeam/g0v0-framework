@@ -1,6 +1,6 @@
 {
   "solution": {
-    "path": "osu-framework.sln",
+    "path": "osu-framework.slnx",
     "projects": [
       "SampleGame.Android\\SampleGame.Android.csproj",
       "SampleGame\\SampleGame.csproj",
