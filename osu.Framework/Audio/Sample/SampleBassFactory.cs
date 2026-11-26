@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading;
 using ManagedBass;
 using osu.Framework.Allocation;
 using osu.Framework.Audio.Mixing.Bass;
@@ -25,7 +26,9 @@ namespace osu.Framework.Audio.Sample
 
         public override bool IsLoaded => SampleId != 0;
 
-        public double Length { get; private set; }
+        public double Length => Volatile.Read(ref length);
+
+        private double length;
 
         /// <summary>
         /// Todo: Expose this to support per-sample playback concurrency once ManagedBass has been updated (https://github.com/ManagedBass/ManagedBass/pull/85).
@@ -95,11 +98,11 @@ namespace osu.Framework.Audio.Sample
             if (!IsLoaded)
                 return;
 
-            Length = Bass.ChannelBytes2Seconds(SampleId, Bass.ChannelGetLength(SampleId)) * 1000;
+            Volatile.Write(ref length, Bass.ChannelBytes2Seconds(SampleId, Bass.ChannelGetLength(SampleId)) * 1000);
             memoryLease = NativeMemoryTracker.AddMemory(this, dataLength);
         }
 
-        public Sample CreateSample() => new SampleBass(this, mixer) { OnPlay = AddItem };
+        public Sample CreateSample() => new SampleBass(this, mixer) { RequestUpdate = AddItem };
 
         ~SampleBassFactory()
         {

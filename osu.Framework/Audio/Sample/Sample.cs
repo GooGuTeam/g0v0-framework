@@ -28,7 +28,7 @@ namespace osu.Framework.Audio.Sample
 
         public Bindable<int> PlaybackConcurrency { get; } = new Bindable<int>(DEFAULT_CONCURRENCY);
 
-        internal Action<Sample> OnPlay;
+        internal Action<Sample> RequestUpdate;
 
         public SampleChannel Play()
         {
@@ -42,14 +42,14 @@ namespace osu.Framework.Audio.Sample
             ObjectDisposedException.ThrowIf(IsDisposed, this);
 
             var channel = CreateChannel();
-            channel.OnPlay = onPlay;
+            channel.RequestUpdate = requestUpdate;
             return channel;
         }
 
-        private void onPlay(SampleChannel channel)
+        private void requestUpdate(SampleChannel channel)
         {
             AddItem(channel);
-            OnPlay?.Invoke(this);
+            RequestUpdate?.Invoke(this);
         }
 
         public override bool IsAlive => base.IsAlive && (!PendingActions.IsEmpty || Items.Count > 0);
@@ -64,9 +64,14 @@ namespace osu.Framework.Audio.Sample
         {
             base.ItemRemoved(item);
 
-            // SampleChannels are removed when they're no longer playing (see SampleChannel.IsAlive).
-            // They need to be disposed at this point when automatic cleanup is requested (the default).
+            // A seek can register a channel temporarily before its first play.
+            if (!item.Played)
+            {
+                item.UnbindAdjustments(this);
+                return;
+            }
 
+            // A finished channel is disposed unless the caller requested manual cleanup.
             if (!item.IsDisposed && !item.ManualFree)
             {
                 item.Dispose();

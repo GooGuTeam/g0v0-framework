@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Threading.Tasks;
@@ -11,7 +11,7 @@ namespace osu.Framework.Audio.Sample
 {
     public abstract class SampleChannel : AdjustableAudioComponent, ISampleChannel, IAudioChannel
     {
-        internal Action<SampleChannel>? OnPlay;
+        internal Action<SampleChannel>? RequestUpdate;
 
         public string Name { get; }
 
@@ -25,8 +25,19 @@ namespace osu.Framework.Audio.Sample
             ObjectDisposedException.ThrowIf(IsDisposed, this);
 
             Played = true;
-            OnPlay?.Invoke(this);
+            RequestUpdate?.Invoke(this);
         }
+
+        /// <summary>
+        /// The playback position in milliseconds, updated by the audio thread.
+        /// </summary>
+        public virtual double CurrentTime => 0;
+
+        /// <summary>
+        /// Requests a position in milliseconds. Returns false if seeking is unsupported, the sample is not loaded, or the position is invalid.
+        /// Accepted requests are processed on the audio thread before subsequent play calls.
+        /// </summary>
+        public virtual bool Seek(double position) => false;
 
         public virtual void Stop()
         {

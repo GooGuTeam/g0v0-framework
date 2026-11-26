@@ -1,8 +1,10 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
+using System.Threading;
 using ManagedBass;
+using ManagedBass.Mix;
 using osu.Framework.Audio.Mixing.Bass;
 using osu.Framework.Audio.Track;
 using osu.Framework.Extensions.ObjectExtensions;
@@ -34,6 +36,55 @@ namespace osu.Framework.Audio.Sample
         }
 
         private volatile bool playing;
+        private double currentTime;
+        private int pendingSeeks;
+
+        public override double CurrentTime => Volatile.Read(ref currentTime);
+
+        public override bool IsAlive => base.IsAlive || (!IsDisposed && Volatile.Read(ref pendingSeeks) > 0);
+
+        public override bool Seek(double position)
+        {
+            ObjectDisposedException.ThrowIf(IsDisposed, this);
+            if (!double.IsFinite(position) || position < 0 || position >= sample.Length)
+                return false;
+
+            if (CanPerformInline)
+                return seekInternal(position);
+
+            // Keep the channel eligible for an update even if it has never been played.
+            Interlocked.Increment(ref pendingSeeks);
+            EnqueueAction(() =>
+            {
+                try
+                {
+                    seekInternal(position);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref pendingSeeks);
+                }
+            });
+            RequestUpdate?.Invoke(this);
+            return true;
+        }
+
+        private bool seekInternal(double position)
+        {
+            ensureChannel();
+            if (!hasChannel)
+                return false;
+
+            long bytePosition = Bass.ChannelSeconds2Bytes(channel, position / 1000);
+            bool seeked = BassMix.ChannelGetMixer(channel) == 0
+                ? Bass.ChannelSetPosition(channel, bytePosition)
+                : bassMixer.ChannelSetPosition(this, bytePosition);
+
+            if (seeked)
+                Volatile.Write(ref currentTime, Bass.ChannelBytes2Seconds(channel, bytePosition) * 1000);
+
+            return seeked;
+        }
 
         /// <summary>
         /// <c>true</c> if the user last called <see cref="Play"/>.
@@ -90,6 +141,10 @@ namespace osu.Framework.Audio.Sample
         {
             if (hasChannel)
             {
+                long position = bassMixer.ChannelGetPosition(this);
+                if (position >= 0)
+                    Volatile.Write(ref currentTime, Bass.ChannelBytes2Seconds(channel, position) * 1000);
+
                 switch (bassMixer.ChannelIsActive(this))
                 {
                     case PlaybackState.Playing:
