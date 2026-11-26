@@ -32,7 +32,7 @@ namespace osu.Framework.IO.Stores
     /// requests for the drawn size, so large text stays sharp without shipping pre-rendered high-resolution sheets.
     /// </para>
     /// </remarks>
-    public unsafe class TrueTypeGlyphStore : IResourceStore<TextureUpload>, IMultiResolutionGlyphStore
+    public unsafe class TrueTypeGlyphStore : IResourceStore<TextureUpload>, IMultiResolutionGlyphStore, IGlyphShaper
     {
         /// <summary>
         /// The font file extensions looked up for an asset name, in order.
@@ -46,6 +46,11 @@ namespace osu.Framework.IO.Stores
 
         private const string resolution_prefix = "@";
         private const string resolution_suffix = "x/";
+
+        /// <summary>
+        /// Marks a texture name that refers to a glyph index rather than to a character.
+        /// </summary>
+        private const string glyph_prefix = "#";
 
         public string FontName { get; }
 
@@ -78,6 +83,18 @@ namespace osu.Framework.IO.Stores
         private FT_FaceRec_* face;
         private OpenTypeKerning? kerning;
         private bool hasKernTable;
+
+        /// <summary>
+        /// Serialises shaping. A HarfBuzz font carries mutable state and must not be used concurrently.
+        /// </summary>
+        /// <remarks>
+        /// Where both locks are needed the order is always <see cref="shapingLock"/> then <see cref="faceLock"/>.
+        /// </remarks>
+        private readonly object shapingLock = new object();
+
+        private HarfBuzzSharp.Blob? harfBuzzBlob;
+        private HarfBuzzSharp.Face? harfBuzzFace;
+        private HarfBuzzSharp.Font? harfBuzzFont;
 
         /// <summary>
         /// Pixels per font unit at texture scale 1.
@@ -172,6 +189,8 @@ namespace osu.Framework.IO.Stores
 
                     kerning = OpenTypeKerning.TryCreate(data);
                     hasKernTable = kerning == null && ((long)face->face_flags & (1 << 6)) != 0; // FT_FACE_FLAG_KERNING
+
+                    initialiseShaping(data, face->units_per_EM);
                 }
                 catch (Exception e)
                 {
@@ -198,6 +217,139 @@ namespace osu.Framework.IO.Stores
 
             return face != null;
         }
+
+        /// <summary>
+        /// Prepares the HarfBuzz objects used for shaping.
+        /// </summary>
+        /// <remarks>
+        /// Shaping is an optional capability: if it cannot be prepared, this store keeps working through the
+        /// per-character path, so a failure here must not fail the font load.
+        /// </remarks>
+        private void initialiseShaping(byte[] data, int unitsPerEm)
+        {
+            try
+            {
+                harfBuzzBlob = HarfBuzzSharp.Blob.FromStream(new MemoryStream(data, writable: false));
+                harfBuzzFace = new HarfBuzzSharp.Face(harfBuzzBlob, 0);
+                harfBuzzFont = new HarfBuzzSharp.Font(harfBuzzFace);
+
+                // Shaping in font units puts advances and offsets in the same space as the FreeType metrics, so
+                // unitScale can convert both to pixels.
+                harfBuzzFont.SetScale(unitsPerEm, unitsPerEm);
+            }
+            catch (Exception e)
+            {
+                Logger.Log($"Couldn't prepare text shaping for {assetName}: {e.Message}", level: LogLevel.Debug);
+                disposeShaping();
+            }
+        }
+
+        private void disposeShaping()
+        {
+            harfBuzzFont?.Dispose();
+            harfBuzzFont = null;
+            harfBuzzFace?.Dispose();
+            harfBuzzFace = null;
+            harfBuzzBlob?.Dispose();
+            harfBuzzBlob = null;
+        }
+
+        bool IGlyphShaper.TryShape(string text, out IReadOnlyList<ShapedGlyph> glyphs) => tryShape(text, out glyphs);
+
+        private bool tryShape(string text, out IReadOnlyList<ShapedGlyph> glyphs)
+        {
+            glyphs = Array.Empty<ShapedGlyph>();
+
+            if (string.IsNullOrEmpty(text) || !ensureLoaded())
+                return false;
+
+            lock (shapingLock)
+            {
+                // Re-check under the lock: the font may have failed to load, or been disposed, in the meantime.
+                var font = harfBuzzFont;
+                if (font == null || Baseline == null)
+                    return false;
+
+                try
+                {
+                    return tryShapeRun(font, text, out glyphs);
+                }
+                catch (Exception e)
+                {
+                    // Shaping must never take down rendering: give up on it for this font and let the per-character
+                    // path handle the rest of the session.
+                    Logger.Error(e, $"Couldn't shape text with {assetName}; falling back to per-character layout.");
+                    disposeShaping();
+                    glyphs = Array.Empty<ShapedGlyph>();
+                    return false;
+                }
+            }
+        }
+
+        private bool tryShapeRun(HarfBuzzSharp.Font font, string text, out IReadOnlyList<ShapedGlyph> glyphs)
+        {
+            glyphs = Array.Empty<ShapedGlyph>();
+
+            using var buffer = new HarfBuzzSharp.Buffer();
+            buffer.AddUtf16(text);
+            buffer.GuessSegmentProperties();
+            font.Shape(buffer);
+
+            var infos = buffer.GlyphInfos;
+            var positions = buffer.GlyphPositions;
+
+            if (infos.Length == 0)
+                return false;
+
+            var shaped = new ShapedGlyph[infos.Length];
+
+            lock (faceLock)
+            {
+                if (face == null || Baseline == null)
+                    return false;
+
+                float baseline = Baseline.Value;
+
+                for (int i = 0; i < infos.Length; i++)
+                {
+                    uint glyphId = infos[i].Codepoint;
+
+                    // Zero is .notdef: the run needs the per-character path, which can fall back to another font.
+                    if (glyphId == 0 || !renderGlyph(glyphId, 1))
+                        return false;
+
+                    var slot = face->glyph;
+                    int cluster = Math.Clamp((int)infos[i].Cluster, 0, text.Length - 1);
+
+                    shaped[i] = new ShapedGlyph(
+                        glyphId,
+                        text[cluster],
+                        positions[i].XAdvance * unitScale,
+                        slot->bitmap_left + positions[i].XOffset * unitScale,
+                        // HarfBuzz measures vertical offsets upwards, the framework downwards from the line top.
+                        baseline - slot->bitmap_top - positions[i].YOffset * unitScale);
+                }
+            }
+
+            glyphs = shaped;
+            return true;
+        }
+
+        string IGlyphShaper.GetTextureName(uint glyphId, int tier) => getTextureName(glyphId, tier);
+
+        private string getTextureName(uint glyphId, int tier)
+        {
+            float scale = getTextureScale(tier);
+            string name = $"{glyph_prefix}{glyphId}";
+
+            return scale == 1
+                ? $"{resourceNamePrefix}{name}"
+                : $"{resourceNamePrefix}{resolution_prefix}{scale.ToString(CultureInfo.InvariantCulture)}{resolution_suffix}{name}";
+        }
+
+        float IGlyphShaper.GetTextureScale(int tier) => getTextureScale(tier);
+
+        private float getTextureScale(int tier) => LowResolutionTextures ? 0.5f : Math.Clamp(tier, 1, MAX_TEXTURE_SCALE);
 
         public bool HasGlyph(char c)
         {
@@ -266,7 +418,7 @@ namespace osu.Framework.IO.Stores
             });
         }
 
-        public float GetTextureScale(char character, int tier) => LowResolutionTextures ? 0.5f : Math.Clamp(tier, 1, MAX_TEXTURE_SCALE);
+        public float GetTextureScale(char character, int tier) => getTextureScale(tier);
 
         public string GetTextureName(char character, int tier)
         {
@@ -280,7 +432,7 @@ namespace osu.Framework.IO.Stores
 
         public TextureUpload Get(string name)
         {
-            if (!tryParseTextureName(name, out char character, out float scale) || !ensureLoaded())
+            if (!tryParseTextureName(name, out char character, out uint glyphId, out float scale) || !ensureLoaded())
                 return null!;
 
             lock (faceLock)
@@ -288,7 +440,7 @@ namespace osu.Framework.IO.Stores
                 if (face == null)
                     return null!;
 
-                uint index = FT_Get_Char_Index(face, character);
+                uint index = glyphId != 0 ? glyphId : FT_Get_Char_Index(face, character);
                 if (index == 0 || !renderGlyph(index, scale))
                     return null!;
 
@@ -314,9 +466,10 @@ namespace osu.Framework.IO.Stores
 
         public Task<TextureUpload> GetAsync(string name, CancellationToken cancellationToken = default) => Task.Run(() => Get(name), cancellationToken);
 
-        private bool tryParseTextureName(string name, out char character, out float scale)
+        private bool tryParseTextureName(string name, out char character, out uint glyphId, out float scale)
         {
             character = default;
+            glyphId = 0;
             scale = 1;
 
             if (name.Length == 1)
@@ -338,6 +491,9 @@ namespace osu.Framework.IO.Stores
 
                 rest = rest[(end + resolution_suffix.Length)..];
             }
+
+            if (rest.Length > 1 && rest.StartsWith(glyph_prefix, StringComparison.Ordinal))
+                return uint.TryParse(rest[glyph_prefix.Length..], NumberStyles.None, CultureInfo.InvariantCulture, out glyphId) && glyphId != 0;
 
             if (rest.Length != 1)
                 return false;
@@ -385,6 +541,8 @@ namespace osu.Framework.IO.Stores
 
         private void releaseFace()
         {
+            disposeShaping();
+
             if (face != null)
             {
                 FT_Done_Face(face);
@@ -416,13 +574,17 @@ namespace osu.Framework.IO.Stores
 
         protected virtual void Dispose(bool disposing)
         {
-            lock (faceLock)
+            // The same order as shaping takes them, so that a shape in flight cannot deadlock against disposal.
+            lock (shapingLock)
             {
-                if (disposed)
-                    return;
+                lock (faceLock)
+                {
+                    if (disposed)
+                        return;
 
-                disposed = true;
-                releaseFace();
+                    disposed = true;
+                    releaseFace();
+                }
             }
         }
 

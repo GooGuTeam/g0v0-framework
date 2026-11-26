@@ -217,6 +217,63 @@ namespace osu.Framework.IO.Stores
         }
 
         /// <summary>
+        /// Shapes a run of text with the font matching <paramref name="fontName"/>.
+        /// </summary>
+        /// <remarks>
+        /// A run is shaped with a single font: if that font does not cover every character in it, this returns
+        /// <see langword="false"/> rather than emitting <c>.notdef</c> glyphs, because only the per-character path can
+        /// substitute glyphs from another font.
+        /// </remarks>
+        /// <returns><see langword="false"/> when shaping is unavailable or the run could not be shaped.</returns>
+        internal bool TryShape(string fontName, string text, float fontSize, out IReadOnlyList<ITexturedCharacterGlyph> glyphs)
+        {
+            glyphs = Array.Empty<ITexturedCharacterGlyph>();
+
+            if (ShapingMode != TextShapingMode.HarfBuzz || string.IsNullOrEmpty(text))
+                return false;
+
+            int tier = getResolutionTier(fontSize);
+
+            foreach (var store in glyphStores)
+            {
+                if (!store.FontName.EndsWith(fontName ?? string.Empty, StringComparison.Ordinal))
+                    continue;
+
+                if (store is not IGlyphShaper shaper || !shaper.TryShape(text, out var shaped))
+                    continue;
+
+                float? baseline = store.Baseline;
+
+                if (baseline == null)
+                    return false;
+
+                var result = new ITexturedCharacterGlyph[shaped.Count];
+
+                for (int i = 0; i < shaped.Count; i++)
+                {
+                    ShapedGlyph glyph = shaped[i];
+
+                    var texture = Get(shaper.GetTextureName(glyph.GlyphId, tier));
+
+                    if (texture == null)
+                        return false;
+
+                    // A null containing store means this glyph takes no kerning: shaping already applied it.
+                    result[i] = new TexturedCharacterGlyph(
+                        new CharacterGlyph(glyph.Character, glyph.XOffset, glyph.YOffset, glyph.XAdvance, baseline.Value, null),
+                        texture,
+                        1 / ScaleAdjust,
+                        shaper.GetTextureScale(tier));
+                }
+
+                glyphs = result;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// The texture resolution multiplier to request for text drawn at <paramref name="fontSize"/>.
         /// Glyph textures are rendered for a size of <see cref="TextureStore.ScaleAdjust"/>; larger text gets 2x or 4x textures from stores that can provide them.
         /// </summary>

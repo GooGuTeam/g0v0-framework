@@ -113,11 +113,41 @@ namespace osu.Framework.Text
         /// <param name="text">The text to append.</param>
         public void AddText(string text)
         {
+            if (tryAddShapedText(text))
+                return;
+
             foreach (char c in text)
             {
                 if (!AddCharacter(c))
                     break;
             }
+        }
+
+        /// <summary>
+        /// Adds <paramref name="text"/> as a single shaped run, if the store is able to shape it.
+        /// </summary>
+        /// <returns>Whether the text was added, in which case nothing further must be added for it.</returns>
+        private bool tryAddShapedText(string text)
+        {
+            // Fixed-width text is laid out on a grid, where shaping cannot change where a glyph ends up.
+            if (font.FixedWidth || string.IsNullOrEmpty(text) || !CanAddCharacters)
+                return false;
+
+            if (!store.TryShape(font.FontName, text, font.Size, out var glyphs)
+                && !store.TryShape(font.FontNameNoFamily, text, font.Size, out glyphs)
+                && !store.TryShape(string.Empty, text, font.Size, out glyphs))
+                return false;
+
+            foreach (var glyph in glyphs)
+            {
+                if (!CanAddCharacters)
+                    break;
+
+                if (!addGlyph(new TextBuilderGlyph(glyph, font.Size, useFontSizeAsHeight: useFontSizeAsHeight)))
+                    break;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -133,6 +163,15 @@ namespace osu.Framework.Text
             if (!tryCreateGlyph(character, out var glyph))
                 return true;
 
+            return addGlyph(glyph);
+        }
+
+        /// <summary>
+        /// Adds an already-resolved glyph at the current position.
+        /// </summary>
+        /// <returns>Whether characters can still be added.</returns>
+        private bool addGlyph(TextBuilderGlyph glyph)
+        {
             // For each character that is added:
             // 1. Add the kerning to the current position if required.
             // 2. Draw the character at the current position offset by the glyph.
