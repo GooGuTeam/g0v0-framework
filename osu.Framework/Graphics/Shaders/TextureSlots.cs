@@ -18,6 +18,14 @@ namespace osu.Framework.Graphics.Shaders
 
         private static readonly Regex vertex_output = new Regex(@"^\s*layout\s*\(\s*location\s*=\s*\d+\s*\)\s*out\s+(?:\w+\s+)?float\s+v_TextureSlot\s*;", RegexOptions.Multiline);
 
+        public static bool IsDefaultShader(string name)
+        {
+            int separator = name.IndexOf('/');
+            return separator >= 0
+                   && ShaderManager.GetShaderFilename(name[..separator], ShaderPartType.Vertex) == "sh_Texture2D.vs"
+                   && ShaderManager.GetShaderFilename(name[(separator + 1)..], ShaderPartType.Fragment) == "sh_Texture.fs";
+        }
+
         public static bool IsSupported(string vertexText) => vertex_output.IsMatch(vertexText);
     }
 }

@@ -73,7 +73,7 @@ namespace osu.Framework.Graphics.OpenGL.Shaders
                     fragmentText = PerVertexMasking.AddDefine(fragmentText);
                 }
 
-                if (TextureSlots.IsSupported(vertexText))
+                if (TextureSlots.IsDefaultShader(name) && TextureSlots.IsSupported(vertexText))
                     fragmentText = PerVertexMasking.AddDefine(fragmentText, TextureSlots.DEFINE);
 
                 compilation = compilationStore.CompileVertexFragment(

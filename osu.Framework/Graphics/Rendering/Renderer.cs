@@ -2154,7 +2154,7 @@ namespace osu.Framework.Graphics.Rendering
             IShader shader = CreateShader(name, parts, shaderCompilationStore);
 
             // The default sprite/text shader only depends on clipping state via getRoundedColor().
-            if (name == $"{VertexShaderDescriptor.TEXTURE_2}/{FragmentShaderDescriptor.TEXTURE}")
+            if (TextureSlots.IsDefaultShader(name))
                 defaultTextureShaders.AddOrUpdate(shader, null);
 
             return shader;

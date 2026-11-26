@@ -136,14 +136,15 @@ namespace osu.Framework.Graphics.Veldrid.Shaders
                 fragmentText = PerVertexMasking.AddDefine(fragmentText);
             }
 
-            bool bindless = renderer.UsesBindlessTextures && TextureSlots.IsSupported(vertexText);
+            bool textureSlots = TextureSlots.IsDefaultShader(name) && TextureSlots.IsSupported(vertexText);
+            bool bindless = renderer.UsesBindlessTextures && textureSlots;
 
             if (bindless)
             {
                 vertexText = VeldridBindlessTextures.AddVertexDefines(vertexText);
                 fragmentText = VeldridBindlessTextures.AddFragmentDefines(fragmentText);
             }
-            else if (renderer is Renderer { UsesTextureSlotShaders: true } && TextureSlots.IsSupported(vertexText))
+            else if (renderer is Renderer { UsesTextureSlotShaders: true } && textureSlots)
                 fragmentText = PerVertexMasking.AddDefine(fragmentText, TextureSlots.DEFINE);
 
             if (renderer.SurfaceType == GraphicsSurfaceType.Vulkan)

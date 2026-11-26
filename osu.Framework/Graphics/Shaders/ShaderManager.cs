@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Concurrent;
@@ -75,7 +75,7 @@ namespace osu.Framework.Graphics.Shaders
 
         private IShaderPart resolveShaderPart(string name, ShaderPartType type)
         {
-            name = ensureValidName(name, type);
+            name = GetShaderFilename(name, type);
 
             IShaderPart? cached = GetCachedShaderPart(name);
             if (cached != null)
@@ -89,7 +89,7 @@ namespace osu.Framework.Graphics.Shaders
             return partCache[name] = renderer.CreateShaderPart(this, name, rawData, type);
         }
 
-        private string ensureValidName(string name, ShaderPartType partType)
+        internal static string GetShaderFilename(string name, ShaderPartType partType)
         {
             string ending = string.Empty;
             if (string.IsNullOrEmpty(Path.GetExtension(name)))
@@ -103,7 +103,7 @@ namespace osu.Framework.Graphics.Shaders
             return name + ending;
         }
 
-        private string getFileEnding(ShaderPartType partType)
+        private static string getFileEnding(ShaderPartType partType)
         {
             switch (partType)
             {
