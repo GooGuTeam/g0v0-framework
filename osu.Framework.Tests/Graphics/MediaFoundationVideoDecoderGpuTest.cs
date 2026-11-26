@@ -27,7 +27,9 @@ namespace osu.Framework.Tests.Graphics
     [TestFixture]
     public class MediaFoundationVideoDecoderGpuTest
     {
-        private static readonly string[] videos = { "h264.mp4", "h264-hd.mp4", "h264.mov", "h264.mkv", "h264.avi", "hevc.mp4", "vp8.webm", "vp9.webm" };
+        // MPEG-4 Part 2 (common in old beatmaps) and MJPEG decode in software even with a device attached; HEVC Main10 goes through P010;
+        // h264-odd.mp4 is 490x274, not a multiple of the 16-pixel macroblock. The framework's FFmpeg cannot decode MJPEG to compare with.
+        private static readonly string[] videos = { "h264.mp4", "h264-hd.mp4", "h264.mov", "h264.mkv", "h264.avi", "hevc.mp4", "vp8.webm", "vp9.webm", "mpeg4.avi", "hevc10.mp4", "h264-odd.mp4" };
 
         private static readonly HardwareVideoDecoder[] modes = { HardwareVideoDecoder.None, HardwareVideoDecoder.Any };
 
@@ -117,7 +119,7 @@ namespace osu.Framework.Tests.Graphics
         /// </summary>
         [Test]
         [Explicit("Requires an offline graphics device, GPU readback and the native GPU video library.")]
-        public void TestZeroCopyMatchesReadback([Values("h264.mp4", "h264-hd.mp4", "hevc.mp4", "vp9.webm")] string name, [Values(false, true)] bool vulkan)
+        public void TestZeroCopyMatchesReadback([Values("h264.mp4", "h264-hd.mp4", "hevc.mp4", "vp8.webm", "vp9.webm", "mpeg4.avi", "mjpeg.avi", "hevc10.mp4", "h264-odd.mp4")] string name, [Values(false, true)] bool vulkan)
         {
             if (vulkan)
                 useVulkanRenderer();

@@ -85,7 +85,7 @@ struct DecoderInfo {
     LONGLONG duration;          // In 100 ns units, or 0 if unknown.
     int matrix;                 // MFVideoTransferMatrix: 1 for BT.709, 2 for BT.601, 0 if unknown.
     int canSeek;
-    int hardware;               // Whether the stream decodes on the GPU (DXVA); updated from the first frame.
+    int hardware;               // Whether the stream decodes on the GPU: a decoding device is attached and the decoder uses it (DXVA).
     int shared;                 // Whether frames are delivered as shared textures (g0_vdec_read_shared).
 };
 
@@ -201,6 +201,30 @@ static HRESULT update_decoder_format(VideoDecoding *d) {
     }
     type->Release();
     return hr;
+}
+
+// Whether the stream's decoder takes the decoding device (DXVA). With a device attached, frames arrive as textures even from software
+// decoders (the video processor uploads them), so where frames end up does not tell.
+static int decoder_uses_device(VideoDecoding *d) {
+    if (!d->manager) return 0;
+    IMFSourceReaderEx *reader = nullptr;
+    if (FAILED(d->reader->QueryInterface(IID_PPV_ARGS(&reader)))) return 0;
+    int aware = 0;
+    GUID category;
+    IMFTransform *transform = nullptr;
+    for (DWORD i = 0; SUCCEEDED(reader->GetTransformForStream((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, i, &category, &transform)); i++) {
+        bool decoder = category == MFT_CATEGORY_VIDEO_DECODER;
+        IMFAttributes *attributes = nullptr;
+        UINT32 value = 0;
+        if (decoder && SUCCEEDED(transform->GetAttributes(&attributes))) {
+            aware = SUCCEEDED(attributes->GetUINT32(MF_SA_D3D11_AWARE, &value)) && value ? 1 : 0;
+            attributes->Release();
+        }
+        release(transform);
+        if (decoder) break;
+    }
+    reader->Release();
+    return aware;
 }
 
 // The adapter with the given LUID, or null if there is none.
@@ -341,6 +365,7 @@ API HRESULT g0_vdec_open(DecoderReadCallback read, void *context, LONGLONG lengt
         return hr;
     }
     d->info.shared = d->share ? 1 : 0;
+    d->info.hardware = decoder_uses_device(d);
     *info = d->info;
     *output = d;
     return S_OK;
@@ -374,12 +399,10 @@ API HRESULT g0_vdec_read(VideoDecoding *d, BYTE *y, BYTE *u, BYTE *v, int capaci
         hr = sample->ConvertToContiguousBuffer(&buffer);
         sample->Release();
         if (FAILED(hr)) return hr;
-        // Hardware frames are texture (array) slices that DXVA may allocate taller than the frame; the chroma plane follows those rows.
+        // Frames in textures are (array) slices that may be allocated taller than the frame; the chroma plane follows those rows.
         UINT32 allocatedHeight = d->frameHeight;
         IMFDXGIBuffer *surface = nullptr;
-        d->info.hardware = 0;
         if (SUCCEEDED(buffer->QueryInterface(IID_PPV_ARGS(&surface)))) {
-            d->info.hardware = 1;
             ID3D11Texture2D *texture = nullptr;
             if (SUCCEEDED(surface->GetResource(IID_PPV_ARGS(&texture)))) {
                 D3D11_TEXTURE2D_DESC desc;
@@ -518,7 +541,7 @@ static HRESULT next_sample(VideoDecoding *d, IMFSample **sample, LONGLONG *time,
     }
 }
 
-// Copies a decoded sample into the NV12 source texture: on the GPU for DXVA frames, uploaded for software-decoded ones.
+// Copies a decoded sample into the NV12 source texture: on the GPU for frames in textures, uploaded for frames in system memory.
 static HRESULT upload_sample(VideoDecoding *d, IMFSample *sample) {
     VideoShare *s = d->share;
     IMFMediaBuffer *buffer = nullptr;
@@ -536,7 +559,6 @@ static HRESULT upload_sample(VideoDecoding *d, IMFSample *sample) {
         }
         release(texture);
         surface->Release();
-        d->info.hardware = 1;
     } else {
         BYTE *data = nullptr;
         LONG pitch = d->stride;
@@ -553,7 +575,6 @@ static HRESULT upload_sample(VideoDecoding *d, IMFSample *sample) {
         if (SUCCEEDED(hr)) s->context->UpdateSubresource(s->source, 0, nullptr, data, (UINT)pitch, 0);
         if (locked2d) { planar->Unlock2D(); planar->Release(); }
         else if (data) buffer->Unlock();
-        d->info.hardware = 0;
     }
     buffer->Release();
     return hr;

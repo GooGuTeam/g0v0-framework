@@ -61,7 +61,7 @@ namespace osu.Framework.Graphics.Video
         private bool disposed;
         private bool loggedDecoding;
 
-        // Zero-copy output, and the lock that keeps slot releases from the draw thread away from closing the native decoder.
+        // Zero-copy output. The lock orders creating and dropping it against Dispose, and slot releases from the draw thread against closing the native decoder.
         private MediaFoundationSharedVideo? shared;
 
         // Set once the renderer could not take a shared frame; decoding then reads frames back for the rest of the video.
@@ -184,8 +184,12 @@ namespace osu.Framework.Graphics.Video
             bool hardware = TargetHardwareVideoDecoders.Value != HardwareVideoDecoder.None;
             long adapter = 0;
 
-            if (hardware && FrameworkFeatureFlags.ZeroCopyVideoDecoding)
-                shared = MediaFoundationSharedVideo.TryCreate(renderer, out adapter);
+            // Under the lock, so that Dispose either sees the consumers or prevents them from being created.
+            lock (sharedLock)
+            {
+                if (hardware && FrameworkFeatureFlags.ZeroCopyVideoDecoding && !disposeStarted)
+                    shared = MediaFoundationSharedVideo.TryCreate(renderer, out adapter);
+            }
 
             int result = g0_vdec_open(&readStream, GCHandle.ToIntPtr(handle), stream.Length, hardware ? 1 : 0, shared != null ? &adapter : null, shared != null ? 1 : 0,
                 out decoder, out info);
@@ -193,19 +197,29 @@ namespace osu.Framework.Graphics.Video
             if (result < 0)
             {
                 decoder = IntPtr.Zero;
-                shared?.Dispose();
-                shared = null;
+                discardShared();
                 Marshal.ThrowExceptionForHR(result);
             }
 
             if (shared != null && info.Shared == 0)
             {
                 Logger.Log("Zero-copy video decoding is unavailable; reading frames back instead");
-                shared.Dispose();
-                shared = null;
+                discardShared();
             }
 
             Logger.Log($"Decoding video with Media Foundation: {info.Width}x{info.Height}, {info.FrameRate:0.##} fps");
+        }
+
+        /// <summary>
+        /// Drops the renderer's side before any frame was shared. It has no consumers yet, so this is safe off the draw thread.
+        /// </summary>
+        private void discardShared()
+        {
+            lock (sharedLock)
+            {
+                shared?.Dispose();
+                shared = null;
+            }
         }
 
         private void decodingLoop(CancellationToken cancellationToken)
@@ -470,19 +484,25 @@ namespace osu.Framework.Graphics.Video
 
         protected override void Dispose(bool disposing)
         {
-            if (disposeStarted)
-                return;
+            lock (sharedLock)
+            {
+                if (disposeStarted)
+                    return;
 
-            disposeStarted = true;
+                disposeStarted = true;
+
+                // The consumers belong to the renderer's device: close them on the draw thread, where they copy frames, and
+                // before an offline renderer destroys its device (it drains scheduled disposals first). Closing the decoder
+                // below does not affect them, as they hold their own references to the shared textures.
+                if (shared != null)
+                    renderer.ScheduleDisposal(static s => s.Dispose(), shared);
+            }
 
             // Stop decoding before disposing the stream.
             StopDecodingAsync().ContinueWith(_ =>
             {
                 lock (streamLock)
                     disposed = true;
-
-                // Consumers first: Vulkan ones wait for their copies to finish.
-                shared?.Dispose();
 
                 lock (sharedLock)
                 {
