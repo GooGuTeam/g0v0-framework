@@ -38,7 +38,7 @@ On Windows x64, `WindowsGameHost.CreateVideoDecoder` returns `MediaFoundationVid
 
 - The managed stream is read through an `IStream` behind `MFCreateMFByteStreamOnStream`. The source reader outputs NV12, which native code copies into I420 planes for the video textures. Decoding is software.
 - Timestamps start at the first frame, and seeks go to the preceding keyframe and skip to the target, as with FFmpeg. Colour conversion follows `MF_MT_YUV_MATRIX`.
-- Streams Media Foundation cannot open (FLV, or HEVC/VP9 without the Windows video extensions) fall back to FFmpeg when it is present.
+- Streams Media Foundation cannot open (FLV, or HEVC/VP9 without the Windows video extensions) fault the decoder; there is no FFmpeg fallback.
 
 The first frames of H.264 (MP4, MOV, MKV, AVI), HEVC, VP8 and VP9 test videos decode identically to FFmpeg. Windows x64 builds leave out FFmpeg's native libraries (`native/WindowsFfmpegExclusion.targets`, carried in the package's `buildTransitive`), saving about 7 MB; without them, files Media Foundation cannot open do not play. MPEG-4 Part 2 AVI files (common in old beatmaps) and hardware decoding are untested.
 

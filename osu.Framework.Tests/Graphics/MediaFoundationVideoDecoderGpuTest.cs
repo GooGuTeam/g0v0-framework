@@ -59,8 +59,7 @@ namespace osu.Framework.Tests.Graphics
             using var ffmpeg = new FFmpegVideoDecoder(renderer, openVideo(name));
             var (ffTime, ffPlanes) = decodeFirstFrame(ffmpeg);
 
-            string decoder = mediaFoundation.UsesMediaFoundation ? "Media Foundation" : "FFmpeg fallback";
-            TestContext.Progress.WriteLine($"{name}: {decoder}, {mediaFoundation.FrameRate:0.##} fps, duration {mediaFoundation.Duration:0} ms (FFmpeg {ffmpeg.Duration:0} ms), "
+            TestContext.Progress.WriteLine($"{name}: {mediaFoundation.FrameRate:0.##} fps, duration {mediaFoundation.Duration:0} ms (FFmpeg {ffmpeg.Duration:0} ms), "
                                            + $"first frame {mfTime:0.#} ms (FFmpeg {ffTime:0.#} ms), {describeDifference(mfPlanes, ffPlanes)}");
 
             Assert.That(mfPlanes.Select(p => p.Length), Is.EqualTo(ffPlanes.Select(p => p.Length)), "plane sizes");
@@ -80,7 +79,7 @@ namespace osu.Framework.Tests.Graphics
         {
             using var decoder = new MediaFoundationVideoDecoder(renderer, openVideo("h264.mp4"));
             decoder.StartDecoding();
-            Assert.That(decoder.UsesMediaFoundation, Is.True);
+            Assert.That(decoder.State, Is.Not.EqualTo(VideoDecoder.DecoderState.Faulted));
 
             double target = decoder.Duration / 2;
             decoder.Seek(target);

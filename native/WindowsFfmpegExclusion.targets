@@ -1,7 +1,7 @@
 ﻿<Project>
   <!-- Windows x64 decodes video with Media Foundation (MediaFoundationVideoDecoder), so neither FFmpeg's native libraries
        nor FFmpeg.AutoGen are shipped there. FLV videos and codecs without a Windows extension then do not play.
-       Set G0V0KeepWindowsFfmpeg to true to keep FFmpeg as a fallback. -->
+       Set G0V0KeepWindowsFfmpeg to true to keep FFmpeg, for builds that turn off the UseMediaFoundationVideoDecoder setting. -->
   <PropertyGroup>
     <_G0V0WindowsFfmpegPattern>^(avcodec-58|avformat-58|avutil-56|swscale-5)$</_G0V0WindowsFfmpegPattern>
   </PropertyGroup>
