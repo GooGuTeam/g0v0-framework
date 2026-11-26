@@ -18,6 +18,11 @@
     <ProjectReference Include="..\osu.Framework\osu.Framework.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The managed HarfBuzzSharp package only carries desktop natives; the iOS framework is a separate package and
+         has to be referenced from a project that targets iOS, not from the framework itself. -->
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.iOS" Version="14.4.0.200" />
+  </ItemGroup>
+  <ItemGroup>
     <None Include="runtimes\**\*" Pack="true" PackagePath="runtimes" />
     <None Include="native\**\*" Pack="true" PackagePath="build\native" />
     <None Include="$(MSBuildThisFileDirectory)..\tools\AssemblyStripper.cs" Pack="true" PackagePath="build\tools\AssemblyStripper.cs" />

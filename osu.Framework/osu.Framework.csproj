@@ -36,8 +36,12 @@ Full licence text: see LICENCE and LICENCE-OSU.</PackageReleaseNotes>
     <PackageReference Include="SharpFNT" Version="2.0.0" />
     <PackageReference Include="FreeTypeSharp" Version="3.1.0" />
     <PackageReference Include="HarfBuzzSharp" Version="14.4.0.200" />
-    <!-- The managed package only carries Win32 and macOS natives; Linux and the mobile platforms resolve their own asset package. -->
-    <PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" Version="14.4.0.200" Condition="'$(TargetPlatformIdentifier)' != 'android' and '$(TargetPlatformIdentifier)' != 'ios'" />
+    <!-- The managed package only carries Win32 and macOS natives. Linux has to be added here; Android and iOS cannot
+         be, because a native asset package has to be referenced from a project targeting that platform, so they are
+         referenced by osu.Framework.Android and osu.Framework.iOS instead. This project has no way of knowing which
+         platform will consume it, so the Linux assets are always part of the graph; they select nothing on a mobile
+         runtime identifier. -->
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" Version="14.4.0.200" />
     <PackageReference Include="NUnit" Version="4.6.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="OpenTabletDriver" Version="0.6.7" />
@@ -64,6 +68,7 @@ Full licence text: see LICENCE and LICENCE-OSU.</PackageReleaseNotes>
   <ItemGroup>
     <None Include="../LICENCE-ETAGERE" Link="LICENCE-ETAGERE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="licences/" />
     <None Include="../LICENCE-GUILLOTIERE" Link="LICENCE-GUILLOTIERE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="licences/" />
+    <None Include="../LICENCE-HARFBUZZ" Link="LICENCE-HARFBUZZ" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="licences/" />
   </ItemGroup>
   <Import Project="../native/ImageCodecs.targets" />
 </Project>

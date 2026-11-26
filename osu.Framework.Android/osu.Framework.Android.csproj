@@ -18,6 +18,9 @@
     <ProjectReference Include="..\osu.Framework\osu.Framework.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The managed HarfBuzzSharp package only carries desktop natives; the Android library is a separate package
+         and has to be referenced from a project that targets Android, not from the framework itself. -->
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.Android" Version="14.4.0.200" />
     <PackageReference Include="Xamarin.AndroidX.Window" Version="1.2.0.1" PrivateAssets="compile" />
   </ItemGroup>
 </Project>
