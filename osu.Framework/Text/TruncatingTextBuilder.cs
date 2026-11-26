@@ -77,14 +77,14 @@ namespace osu.Framework.Text
         /// </remarks>
         private bool tryAddShapedTruncated(string text)
         {
-            if (addingEllipsis || font.FixedWidth || string.IsNullOrEmpty(text))
+            // Truncation keeps the start of the text and drops the end, which is only where the run ends when it reads
+            // left to right. Right-to-left text keeps the per-glyph path, which does not need to know where it ends.
+            if (addingEllipsis || font.FixedWidth || string.IsNullOrEmpty(text) || BidirectionalText.ContainsRightToLeft(text))
                 return false;
 
-            if (!TryShapeText(text, out var glyphs))
+            if (!TryShapeText(text, 0, out var glyphs))
                 return false;
 
-            // Truncation keeps the start of the text and drops the end, which is only where the run ends when the
-            // glyphs are laid out left to right. A run of another direction falls back to per-glyph truncation.
             if (glyphs.Count == 0 || glyphs[0].ClusterStart != 0)
                 return false;
 
@@ -103,7 +103,7 @@ namespace osu.Framework.Text
 
             IReadOnlyList<ShapedCharacterGlyph>? prefix = null;
 
-            if (cut > 0 && !TryShapeText(text.Substring(0, cut), out prefix))
+            if (cut > 0 && !TryShapeText(text.Substring(0, cut), 0, out prefix))
                 return false;
 
             addingEllipsis = true;

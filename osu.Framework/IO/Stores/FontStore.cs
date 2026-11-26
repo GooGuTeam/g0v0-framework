@@ -224,8 +224,13 @@ namespace osu.Framework.IO.Stores
         /// <see langword="false"/> rather than emitting <c>.notdef</c> glyphs, because only the per-character path can
         /// substitute glyphs from another font.
         /// </remarks>
+        /// <param name="fontName">The font to shape with, matched like <see cref="ITexturedGlyphLookupStore.Get"/>.</param>
+        /// <param name="text">The run to shape.</param>
+        /// <param name="fontSize">The size the text will be drawn at, which selects the glyph texture resolution.</param>
+        /// <param name="clusterOffset">The position of <paramref name="text"/> within the line, added to reported clusters.</param>
+        /// <param name="glyphs">The shaped glyphs, one per shaped output glyph.</param>
         /// <returns><see langword="false"/> when shaping is unavailable or the run could not be shaped.</returns>
-        internal bool TryShape(string fontName, string text, float fontSize, out IReadOnlyList<ShapedCharacterGlyph> glyphs)
+        internal bool TryShape(string fontName, string text, float fontSize, int clusterOffset, out IReadOnlyList<ShapedCharacterGlyph> glyphs)
         {
             glyphs = Array.Empty<ShapedCharacterGlyph>();
 
@@ -265,7 +270,7 @@ namespace osu.Framework.IO.Stores
                         1 / ScaleAdjust,
                         shaper.GetTextureScale(tier));
 
-                    result[i] = new ShapedCharacterGlyph(textured, glyph.ClusterStart, glyph.ClusterLength);
+                    result[i] = new ShapedCharacterGlyph(textured, glyph.ClusterStart + clusterOffset, glyph.ClusterLength);
                 }
 
                 glyphs = result;

@@ -124,7 +124,7 @@ namespace osu.Framework.Text
         }
 
         /// <summary>
-        /// Adds <paramref name="text"/> as a single shaped run, if the store is able to shape it.
+        /// Adds <paramref name="text"/> as shaped runs, if the store is able to shape it.
         /// </summary>
         /// <returns>Whether the text was added, in which case nothing further must be added for it.</returns>
         private bool tryAddShapedText(string text)
@@ -133,10 +133,37 @@ namespace osu.Framework.Text
             if (font.FixedWidth || string.IsNullOrEmpty(text) || !CanAddCharacters)
                 return false;
 
-            if (!TryShapeText(text, out var glyphs))
-                return false;
+            var runs = BidirectionalText.GetRuns(text);
 
-            AddShapedGlyphs(glyphs);
+            if (runs.Count == 1 && runs[0].Start == 0 && runs[0].Length == text.Length)
+            {
+                if (!TryShapeText(text, 0, out var glyphs))
+                    return false;
+
+                AddShapedGlyphs(glyphs);
+                return true;
+            }
+
+            // Every run is shaped before any of them is added: one run that cannot be shaped sends the whole text back
+            // to the per-character path, which is the only one that can substitute glyphs from another font.
+            var shapedRuns = new List<IReadOnlyList<ShapedCharacterGlyph>>(runs.Count);
+
+            foreach (var run in runs)
+            {
+                if (!TryShapeText(text.Substring(run.Start, run.Length), run.Start, out var glyphs))
+                    return false;
+
+                shapedRuns.Add(glyphs);
+            }
+
+            foreach (var run in shapedRuns)
+            {
+                AddShapedGlyphs(run);
+
+                if (!CanAddCharacters)
+                    break;
+            }
+
             return true;
         }
 
@@ -144,12 +171,16 @@ namespace osu.Framework.Text
         /// Shapes <paramref name="text"/> with the font of this builder, if the store is able to.
         /// </summary>
         /// <param name="text">The text to shape.</param>
+        /// <param name="clusterOffset">
+        /// The position of <paramref name="text"/> within the line, added to every reported cluster so that a line made
+        /// of several runs keeps one character numbering.
+        /// </param>
         /// <param name="glyphs">The shaped glyphs, each with the characters it covers.</param>
         /// <returns><see langword="false"/> if shaping is unavailable or the run could not be shaped.</returns>
-        private protected bool TryShapeText(string text, out IReadOnlyList<ShapedCharacterGlyph> glyphs)
-            => store.TryShape(font.FontName, text, font.Size, out glyphs)
-               || store.TryShape(font.FontNameNoFamily, text, font.Size, out glyphs)
-               || store.TryShape(string.Empty, text, font.Size, out glyphs);
+        private protected bool TryShapeText(string text, int clusterOffset, out IReadOnlyList<ShapedCharacterGlyph> glyphs)
+            => store.TryShape(font.FontName, text, font.Size, clusterOffset, out glyphs)
+               || store.TryShape(font.FontNameNoFamily, text, font.Size, clusterOffset, out glyphs)
+               || store.TryShape(string.Empty, text, font.Size, clusterOffset, out glyphs);
 
         /// <summary>
         /// The width the first <paramref name="count"/> glyphs of a shaped run occupy when added at the current

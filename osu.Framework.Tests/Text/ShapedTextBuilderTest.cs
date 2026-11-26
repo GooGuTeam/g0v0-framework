@@ -250,6 +250,24 @@ namespace osu.Framework.Tests.Text
             Assert.That(truncating.Characters, Has.Count.EqualTo(3));
         }
 
+        /// <summary>
+        /// A line is shaped run by run, and one run that cannot be shaped sends the whole line back to the
+        /// per-character path. Text in a script the font does not cover must degrade, not break.
+        /// </summary>
+        [Test]
+        public void TestUncoveredRightToLeftRunFallsBack()
+        {
+            using var store = createStore(TextShapingMode.HarfBuzz);
+            var builder = new TextBuilder(store, font);
+
+            // Figtree has no Arabic, so the second run cannot be shaped.
+            builder.AddText("abc\u0645\u0631\u062D\u0628\u0627");
+
+            Assert.That(builder.Characters, Has.Count.EqualTo(8));
+            Assert.That(builder.Characters.Take(3).Select(c => c.Character), Is.EqualTo("abc"));
+            Assert.That(builder.Characters.Skip(3).Select(c => c.Character), Is.All.EqualTo('?'), "Uncovered characters reach the fallback glyph.");
+        }
+
         private FontStore createStore(TextShapingMode mode)
         {
             var renderer = new DummyRenderer { ShapingMode = mode };
