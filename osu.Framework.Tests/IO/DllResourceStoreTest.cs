@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System.Threading.Tasks;
 using NUnit.Framework;
@@ -27,5 +27,17 @@ namespace osu.Framework.Tests.IO
             byte[]? stream = await resourceStore.GetAsync("Resources.Tracks.sample-track.mp5").ConfigureAwait(false);
             Assert.That(stream, Is.Null);
         }
+
+        [TestCase("Samples", "Samples")]
+        [TestCase("my-dir", "my_dir")]
+        [TestCase("Long Notes", "Long_Notes")]
+        [TestCase("4k", "_4k")]
+        [TestCase("-x", "_x")]
+        [TestCase("v1.2", "v1._2")]
+        [TestCase("a..b", "a..b")]
+        [TestCase("-", "__")]
+        [TestCase("_", "__")]
+        public void TestManifestFolderName(string folder, string expected)
+            => Assert.That(DllResourceStore.ManifestFolderName(folder), Is.EqualTo(expected));
     }
 }

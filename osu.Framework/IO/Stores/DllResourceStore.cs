@@ -1,13 +1,15 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 #nullable disable
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using osu.Framework.Extensions;
@@ -89,10 +91,55 @@ namespace osu.Framework.IO.Stores
 
             string[] split = name.Split('/');
             for (int i = 0; i < split.Length - 1; i++)
-                split[i] = split[i].Replace('-', '_');
+                split[i] = ManifestFolderName(split[i]);
 
             return assembly?.GetManifestResourceStream($@"{prefix}.{string.Join('.', split)}");
         }
+
+        /// <summary>
+        /// The form MSBuild gives a folder name in manifest resource names (<c>CreateManifestResourceName.MakeValidEverettFolderIdentifier</c>):
+        /// each <c>.</c>-separated part becomes an identifier, where invalid characters become <c>_</c> and a part not starting with a letter
+        /// or <c>_</c> gets a leading <c>_</c> (<c>Long Notes</c> → <c>Long_Notes</c>, <c>4k</c> → <c>_4k</c>, <c>my-dir</c> → <c>my_dir</c>, <c>v1.2</c> → <c>v1._2</c>).
+        /// </summary>
+        internal static string ManifestFolderName(string folder)
+        {
+            var result = new StringBuilder(folder.Length + 1);
+            string[] parts = folder.Split('.');
+
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (i > 0)
+                    result.Append('.');
+
+                string part = parts[i];
+                if (part.Length == 0)
+                    continue;
+
+                if (isValidIdentifierStart(part[0]))
+                    result.Append(part[0]);
+                else
+                {
+                    result.Append('_');
+                    if (isValidIdentifierPart(part[0]))
+                        result.Append(part[0]);
+                }
+
+                for (int j = 1; j < part.Length; j++)
+                    result.Append(isValidIdentifierPart(part[j]) ? part[j] : '_');
+            }
+
+            // A folder cannot be a single underscore.
+            if (result.Length == 1 && result[0] == '_')
+                result.Append('_');
+
+            return result.ToString();
+        }
+
+        private static bool isValidIdentifierStart(char c) => char.IsLetter(c) || char.GetUnicodeCategory(c) == UnicodeCategory.ConnectorPunctuation;
+
+        private static bool isValidIdentifierPart(char c) => char.IsLetterOrDigit(c)
+                                                             || char.GetUnicodeCategory(c) is UnicodeCategory.ConnectorPunctuation or UnicodeCategory.NonSpacingMark
+                                                                 or UnicodeCategory.SpacingCombiningMark or UnicodeCategory.EnclosingMark;
 
         #region IDisposable Support
 
