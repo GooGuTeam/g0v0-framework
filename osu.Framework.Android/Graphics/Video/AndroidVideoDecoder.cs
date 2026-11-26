@@ -1,5 +1,5 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System;
 using System.Collections.Generic;
@@ -15,7 +15,7 @@ using osu.Framework.Logging;
 namespace osu.Framework.Android.Graphics.Video
 {
     // ReSharper disable InconsistentNaming
-    public unsafe class AndroidVideoDecoder : VideoDecoder
+    public unsafe class AndroidVideoDecoder : FFmpegVideoDecoder
     {
         private const string lib_avutil = "libavutil.so";
         private const string lib_avcodec = "libavcodec.so";

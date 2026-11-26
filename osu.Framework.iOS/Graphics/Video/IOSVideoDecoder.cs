@@ -1,5 +1,5 @@
-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// See the LICENCE-OSU file in the repository root for full licence text.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh> & GooGuTeam. Licensed under the MIT Licence.
+// See the LICENCE & LICENCE-OSU file in the repository root for full licence text.
 
 using System.IO;
 using System.Runtime.InteropServices;
@@ -10,7 +10,7 @@ using osu.Framework.Graphics.Video;
 namespace osu.Framework.iOS.Graphics.Video
 {
     // ReSharper disable InconsistentNaming
-    public unsafe class IOSVideoDecoder : VideoDecoder
+    public unsafe class IOSVideoDecoder : FFmpegVideoDecoder
     {
         private const string dll_name = "__Internal";
 

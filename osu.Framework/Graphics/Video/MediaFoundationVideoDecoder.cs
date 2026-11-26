@@ -46,16 +46,16 @@ namespace osu.Framework.Graphics.Video
         public static bool IsAvailable => OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64
                                                                     && FrameworkFeatureFlags.UseMediaFoundationVideoDecoder;
 
-        public override double Duration => useFfmpeg ? base.Duration : info.Duration / 10000.0;
-        public override double FrameRate => useFfmpeg ? base.FrameRate : info.FrameRate;
-        public override bool CanSeek => useFfmpeg ? base.CanSeek : info.CanSeek != 0;
-        public override DecoderState State => useFfmpeg ? base.State : state;
-        public override float LastDecodedFrameTime => useFfmpeg ? base.LastDecodedFrameTime : lastDecodedFrameTime;
+        public override double Duration => ffmpegFallback != null ? ffmpegFallback.Duration : info.Duration / 10000.0;
+        public override double FrameRate => ffmpegFallback != null ? ffmpegFallback.FrameRate : info.FrameRate;
+        public override bool CanSeek => ffmpegFallback != null ? ffmpegFallback.CanSeek : info.CanSeek != 0;
+        public override DecoderState State => ffmpegFallback != null ? ffmpegFallback.State : state;
+        public override float LastDecodedFrameTime => ffmpegFallback != null ? ffmpegFallback.LastDecodedFrameTime : lastDecodedFrameTime;
 
         /// <summary>
         /// Whether Media Foundation opened the stream, rather than the FFmpeg fallback.
         /// </summary>
-        internal bool UsesMediaFoundation => !useFfmpeg && decoder != IntPtr.Zero;
+        internal bool UsesMediaFoundation => ffmpegFallback == null && decoder != IntPtr.Zero;
 
         private readonly IRenderer renderer;
         private readonly Stream stream;
@@ -68,7 +68,7 @@ namespace osu.Framework.Graphics.Video
         private GCHandle handle;
         private IntPtr decoder;
         private DecoderInfo info;
-        private bool useFfmpeg;
+        private VideoDecoder? ffmpegFallback;
         private bool disposeStarted;
         private bool disposed;
         private volatile DecoderState state = DecoderState.Ready;
@@ -81,18 +81,32 @@ namespace osu.Framework.Graphics.Video
         private CancellationTokenSource? decodingCancellation;
 
         public MediaFoundationVideoDecoder(IRenderer renderer, Stream videoStream)
-            : base(renderer, videoStream)
         {
+            if (!videoStream.CanRead)
+                throw new InvalidOperationException($"The given stream does not support reading. A stream used for a {nameof(MediaFoundationVideoDecoder)} must support reading.");
+
             this.renderer = renderer;
             stream = videoStream;
             handle = GCHandle.Alloc(this, GCHandleType.Weak);
         }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private VideoDecoder createFfmpegFallback()
+        {
+            var fallback = new FFmpegVideoDecoder(renderer, stream)
+            {
+                Looping = Looping,
+            };
+            fallback.TargetHardwareVideoDecoders.BindTo(TargetHardwareVideoDecoders);
+            return fallback;
+        }
+
         public override void StartDecoding()
         {
-            if (useFfmpeg)
+            if (ffmpegFallback != null)
             {
-                base.StartDecoding();
+                ffmpegFallback.Looping = Looping;
+                ffmpegFallback.StartDecoding();
                 return;
             }
 
@@ -115,10 +129,21 @@ namespace osu.Framework.Graphics.Video
                     }
 
                     Logger.Log($"Media Foundation cannot decode this video, falling back to FFmpeg: {e.Message}");
-                    useFfmpeg = true;
                     if (stream.CanSeek)
                         stream.Position = 0;
-                    base.StartDecoding();
+
+                    try
+                    {
+                        ffmpegFallback = createFfmpegFallback();
+                    }
+                    catch (Exception fallbackError)
+                    {
+                        Logger.Log($"FFmpeg fallback is not available: {fallbackError.Message}");
+                        state = DecoderState.Faulted;
+                        return;
+                    }
+
+                    ffmpegFallback.StartDecoding();
                     return;
                 }
             }
@@ -130,8 +155,8 @@ namespace osu.Framework.Graphics.Video
 
         public override Task StopDecodingAsync()
         {
-            if (useFfmpeg)
-                return base.StopDecodingAsync();
+            if (ffmpegFallback != null)
+                return ffmpegFallback.StopDecodingAsync();
 
             if (decodingTask == null)
                 return Task.CompletedTask;
@@ -149,9 +174,9 @@ namespace osu.Framework.Graphics.Video
 
         public override void Seek(double targetTimestamp)
         {
-            if (useFfmpeg)
+            if (ffmpegFallback != null)
             {
-                base.Seek(targetTimestamp);
+                ffmpegFallback.Seek(targetTimestamp);
                 return;
             }
 
@@ -163,9 +188,9 @@ namespace osu.Framework.Graphics.Video
 
         public override void ReturnFrames(IEnumerable<DecodedFrame> frames)
         {
-            if (useFfmpeg)
+            if (ffmpegFallback != null)
             {
-                base.ReturnFrames(frames);
+                ffmpegFallback.ReturnFrames(frames);
                 return;
             }
 
@@ -178,8 +203,8 @@ namespace osu.Framework.Graphics.Video
 
         public override IEnumerable<DecodedFrame> GetDecodedFrames()
         {
-            if (useFfmpeg)
-                return base.GetDecodedFrames();
+            if (ffmpegFallback != null)
+                return ffmpegFallback.GetDecodedFrames();
 
             var frames = new List<DecodedFrame>(decodedFrames.Count);
             while (decodedFrames.TryDequeue(out var frame))
@@ -190,8 +215,8 @@ namespace osu.Framework.Graphics.Video
 
         public override Matrix3 GetConversionMatrix()
         {
-            if (useFfmpeg)
-                return base.GetConversionMatrix();
+            if (ffmpegFallback != null)
+                return ffmpegFallback.GetConversionMatrix();
 
             if (decoder == IntPtr.Zero)
                 return Matrix3.Zero;
@@ -375,7 +400,14 @@ namespace osu.Framework.Graphics.Video
 
             disposeStarted = true;
 
-            // Stop decoding before the base class disposes the stream.
+            if (ffmpegFallback != null)
+            {
+                ffmpegFallback.Dispose();
+                handle.Free();
+                return;
+            }
+
+            // Stop decoding before disposing the stream.
             StopDecodingAsync().ContinueWith(_ =>
             {
                 lock (streamLock)
@@ -399,8 +431,8 @@ namespace osu.Framework.Graphics.Video
                 while (availableBuffers.TryDequeue(out var buffer))
                     buffer.Dispose();
 
+                stream.Dispose();
                 handle.Free();
-                base.Dispose(disposing);
             });
         }
 

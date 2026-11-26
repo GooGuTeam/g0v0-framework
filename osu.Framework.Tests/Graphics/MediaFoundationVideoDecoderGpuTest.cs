@@ -56,7 +56,7 @@ namespace osu.Framework.Tests.Graphics
             using var mediaFoundation = new MediaFoundationVideoDecoder(renderer, openVideo(name));
             var (mfTime, mfPlanes) = decodeFirstFrame(mediaFoundation);
 
-            using var ffmpeg = new VideoDecoder(renderer, openVideo(name));
+            using var ffmpeg = new FFmpegVideoDecoder(renderer, openVideo(name));
             var (ffTime, ffPlanes) = decodeFirstFrame(ffmpeg);
 
             string decoder = mediaFoundation.UsesMediaFoundation ? "Media Foundation" : "FFmpeg fallback";
