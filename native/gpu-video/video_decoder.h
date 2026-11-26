@@ -6,6 +6,8 @@
 
 // Media Foundation video decoding for the framework's VideoDecoder on Windows. The managed stream is
 // read through a positional callback, and frames are returned as I420 planes, the layout video textures expect.
+// With hardware decoding, the decoder and video processor run on a private D3D11 device (DXVA) and each frame is
+// read back from its texture; Media Foundation falls back to its software decoders when the GPU lacks the codec.
 
 // Exported by mfplat (Windows 7 and later) but missing from the MinGW headers.
 extern "C" HRESULT WINAPI MFCreateMFByteStreamOnStream(IStream *stream, IMFByteStream **byteStream);
@@ -78,6 +80,7 @@ struct DecoderInfo {
     LONGLONG duration;          // In 100 ns units, or 0 if unknown.
     int matrix;                 // MFVideoTransferMatrix: 1 for BT.709, 2 for BT.601, 0 if unknown.
     int canSeek;
+    int hardware;               // Whether the stream decodes on the GPU (DXVA); updated from the first frame.
 };
 
 // Calls may arrive on different managed threads, so each entry point balances its own COM initialisation.
@@ -92,6 +95,8 @@ struct ComScope {
 
 struct VideoDecoding {
     IMFSourceReader *reader = nullptr;
+    ID3D11Device *device = nullptr;
+    IMFDXGIDeviceManager *manager = nullptr;
     UINT32 frameWidth = 0, frameHeight = 0;   // Allocated size, which can exceed the visible size.
     LONG stride = 0;
     DecoderInfo info = {};
@@ -140,7 +145,24 @@ static HRESULT update_decoder_format(VideoDecoding *d) {
     return hr;
 }
 
-API HRESULT g0_vdec_open(DecoderReadCallback read, void *context, LONGLONG length, VideoDecoding **output, DecoderInfo *info) {
+// A device for DXVA decoding. Media Foundation uses its immediate context from its own threads, so it is multithread protected.
+static HRESULT create_decoding_device(VideoDecoding *d) {
+    D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0 };
+    HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+                                   levels, ARRAYSIZE(levels), D3D11_SDK_VERSION, &d->device, nullptr, nullptr);
+    ID3D10Multithread *threading = nullptr;
+    CHECK(d->device->QueryInterface(__uuidof(ID3D10Multithread), (void **)&threading));
+    if (SUCCEEDED(hr)) threading->SetMultithreadProtected(TRUE);
+    release(threading);
+    UINT token = 0;
+    CHECK(MFCreateDXGIDeviceManager(&token, &d->manager));
+    CHECK(d->manager->ResetDevice(d->device, token));
+    if (FAILED(hr)) { release(d->manager); release(d->device); }
+    return hr;
+}
+
+// `hardware` requests DXVA decoding; without a usable D3D11 device the stream is still decoded in software.
+API HRESULT g0_vdec_open(DecoderReadCallback read, void *context, LONGLONG length, int hardware, VideoDecoding **output, DecoderInfo *info) {
     if (!read || !output || !info || length < 0) return E_INVALIDARG;
     *output = nullptr;
     ComScope com;
@@ -155,9 +177,13 @@ API HRESULT g0_vdec_open(DecoderReadCallback read, void *context, LONGLONG lengt
     IMFMediaType *type = nullptr;
     hr = d && stream ? S_OK : E_OUTOFMEMORY;
     CHECK(MFCreateMFByteStreamOnStream(stream, &bytes));
-    CHECK(MFCreateAttributes(&attributes, 1));
-    // Converts decoders' other YUV outputs to NV12 in software; most decoders produce NV12 already.
+    CHECK(MFCreateAttributes(&attributes, 3));
+    // Converts decoders' other YUV outputs to NV12 (on the GPU with a device); most decoders produce NV12 already.
     CHECK(attributes->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE));
+    if (SUCCEEDED(hr) && hardware && SUCCEEDED(create_decoding_device(d))) {
+        CHECK(attributes->SetUnknown(MF_SOURCE_READER_D3D_MANAGER, d->manager));
+        CHECK(attributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE));
+    }
     if (SUCCEEDED(hr)) hr = MFCreateSourceReaderFromByteStream(bytes, attributes, &d->reader);
     CHECK(d->reader->SetStreamSelection((DWORD)MF_SOURCE_READER_ALL_STREAMS, FALSE));
     CHECK(d->reader->SetStreamSelection((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE));
@@ -179,7 +205,7 @@ API HRESULT g0_vdec_open(DecoderReadCallback read, void *context, LONGLONG lengt
     release(type); release(attributes); release(bytes);
     if (stream) stream->Release();
     if (FAILED(hr)) {
-        if (d) { release(d->reader); delete d; }
+        if (d) { release(d->reader); release(d->manager); release(d->device); delete d; }
         MFShutdown();
         return hr;
     }
@@ -189,7 +215,7 @@ API HRESULT g0_vdec_open(DecoderReadCallback read, void *context, LONGLONG lengt
 }
 
 // Decodes the next frame into I420 planes of the visible size: Y with stride `width`, then U and V with
-// stride (width + 1) / 2. Returns S_FALSE at the end of the stream. `info` is refreshed if the format changes.
+// stride (width + 1) / 2. Returns S_FALSE at the end of the stream. `info` is refreshed with each frame and on format changes.
 API HRESULT g0_vdec_read(VideoDecoding *d, BYTE *y, BYTE *u, BYTE *v, int capacityWidth, int capacityHeight, LONGLONG *time, DecoderInfo *info) {
     if (!d || !y || !u || !v || !time || !info) return E_INVALIDARG;
     ComScope com;
@@ -214,6 +240,21 @@ API HRESULT g0_vdec_read(VideoDecoding *d, BYTE *y, BYTE *u, BYTE *v, int capaci
         hr = sample->ConvertToContiguousBuffer(&buffer);
         sample->Release();
         if (FAILED(hr)) return hr;
+        // Hardware frames are texture (array) slices that DXVA may allocate taller than the frame; the chroma plane follows those rows.
+        UINT32 allocatedHeight = d->frameHeight;
+        IMFDXGIBuffer *surface = nullptr;
+        d->info.hardware = 0;
+        if (SUCCEEDED(buffer->QueryInterface(IID_PPV_ARGS(&surface)))) {
+            d->info.hardware = 1;
+            ID3D11Texture2D *texture = nullptr;
+            if (SUCCEEDED(surface->GetResource(IID_PPV_ARGS(&texture)))) {
+                D3D11_TEXTURE2D_DESC desc;
+                texture->GetDesc(&desc);
+                if (desc.Height >= d->frameHeight) allocatedHeight = desc.Height;
+                texture->Release();
+            }
+            surface->Release();
+        }
         BYTE *data = nullptr;
         LONG pitch = d->stride;
         DWORD length = 0;
@@ -225,13 +266,13 @@ API HRESULT g0_vdec_read(VideoDecoding *d, BYTE *y, BYTE *u, BYTE *v, int capaci
             if (FAILED(hr)) { buffer->Release(); return hr; }
         }
         // NV12: the interleaved chroma plane follows the allocated luma rows.
-        const LONGLONG required = (LONGLONG)pitch * d->frameHeight * 3 / 2;
+        const LONGLONG required = (LONGLONG)pitch * allocatedHeight * 3 / 2;
         if (pitch <= 0 || (!locked2d && length < required)) hr = MF_E_BUFFERTOOSMALL;
         if (SUCCEEDED(hr)) {
             const int chromaWidth = (width + 1) / 2, chromaHeight = (height + 1) / 2;
             for (int row = 0; row < height; row++)
                 memcpy(y + (size_t)row * width, data + (size_t)row * pitch, (size_t)width);
-            const BYTE *chroma = data + (size_t)pitch * d->frameHeight;
+            const BYTE *chroma = data + (size_t)pitch * allocatedHeight;
             for (int row = 0; row < chromaHeight; row++) {
                 const BYTE *source = chroma + (size_t)row * pitch;
                 BYTE *uRow = u + (size_t)row * chromaWidth, *vRow = v + (size_t)row * chromaWidth;
@@ -241,6 +282,7 @@ API HRESULT g0_vdec_read(VideoDecoding *d, BYTE *y, BYTE *u, BYTE *v, int capaci
                 }
             }
             *time = timestamp;
+            *info = d->info;
         }
         if (locked2d) { planar->Unlock2D(); planar->Release(); }
         else buffer->Unlock();
@@ -265,6 +307,8 @@ API void g0_vdec_close(VideoDecoding *d) {
     if (!d) return;
     ComScope com;
     release(d->reader);
+    release(d->manager);
+    release(d->device);
     delete d;
     MFShutdown();
 }

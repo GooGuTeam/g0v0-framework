@@ -19,12 +19,14 @@ namespace osu.Framework.Tests.Graphics
 {
     /// <summary>
     /// Media Foundation decodes the first frame of each test video to the same YUV planes as FFmpeg, read back from the GPU,
-    /// or falls back to FFmpeg for formats it cannot open.
+    /// in software and with DXVA. FLV is left out: Media Foundation cannot open it, and beatmaps may not use it.
     /// </summary>
     [TestFixture]
     public class MediaFoundationVideoDecoderGpuTest
     {
-        private static readonly string[] videos = { "h264.mp4", "h264-hd.mp4", "h264.mov", "h264.mkv", "h264.avi", "h264.flv", "hevc.mp4", "vp8.webm", "vp9.webm" };
+        private static readonly string[] videos = { "h264.mp4", "h264-hd.mp4", "h264.mov", "h264.mkv", "h264.avi", "hevc.mp4", "vp8.webm", "vp9.webm" };
+
+        private static readonly HardwareVideoDecoder[] modes = { HardwareVideoDecoder.None, HardwareVideoDecoder.Any };
 
         private VeldridRenderer renderer = null!;
         private bool wasDrawThread;
@@ -49,11 +51,11 @@ namespace osu.Framework.Tests.Graphics
             ThreadSafety.IsDrawThread = wasDrawThread;
         }
 
-        [TestCaseSource(nameof(videos))]
+        [Test]
         [Explicit("Requires an offline graphics device, GPU readback and the native GPU video library.")]
-        public void TestFirstFrameMatchesFfmpeg(string name)
+        public void TestFirstFrameMatchesFfmpeg([ValueSource(nameof(videos))] string name, [ValueSource(nameof(modes))] HardwareVideoDecoder mode)
         {
-            using var mediaFoundation = new MediaFoundationVideoDecoder(renderer, openVideo(name));
+            using var mediaFoundation = createDecoder(name, mode);
             var (mfTime, mfPlanes) = decodeFirstFrame(mediaFoundation);
 
             using var ffmpeg = new FFmpegVideoDecoder(renderer, openVideo(name));
@@ -75,9 +77,9 @@ namespace osu.Framework.Tests.Graphics
 
         [Test]
         [Explicit("Requires an offline graphics device and the native GPU video library.")]
-        public void TestSeekAndEndOfStream()
+        public void TestSeekAndEndOfStream([ValueSource(nameof(modes))] HardwareVideoDecoder mode)
         {
-            using var decoder = new MediaFoundationVideoDecoder(renderer, openVideo("h264.mp4"));
+            using var decoder = createDecoder("h264.mp4", mode);
             decoder.StartDecoding();
             Assert.That(decoder.State, Is.Not.EqualTo(VideoDecoder.DecoderState.Faulted));
 
@@ -96,6 +98,45 @@ namespace osu.Framework.Tests.Graphics
                 decoder.ReturnFrames(decoder.GetDecodedFrames());
                 Thread.Sleep(1);
             }
+        }
+
+        /// <summary>
+        /// Decodes a whole video without uploading frames, reporting the process CPU time spent, to compare software decoding with DXVA.
+        /// </summary>
+        [Test]
+        [Explicit("Requires an offline graphics device and the native GPU video library; prints timings.")]
+        public void TestDecodingCost([Values("h264-hd.mp4", "hevc.mp4")] string name, [ValueSource(nameof(modes))] HardwareVideoDecoder mode)
+        {
+            using var decoder = createDecoder(name, mode);
+            var process = Process.GetCurrentProcess();
+            var cpuBefore = process.TotalProcessorTime;
+            var stopwatch = Stopwatch.StartNew();
+            int frames = 0;
+
+            decoder.StartDecoding();
+
+            while (decoder.State != VideoDecoder.DecoderState.EndOfStream)
+            {
+                Assert.That(decoder.IsFaulted, Is.False);
+                Assert.That(stopwatch.Elapsed.TotalSeconds, Is.LessThan(60), "reaching the end");
+
+                var decoded = decoder.GetDecodedFrames().ToArray();
+                frames += decoded.Length;
+                decoder.ReturnFrames(decoded);
+                Thread.Sleep(1);
+            }
+
+            process.Refresh();
+            double cpu = (process.TotalProcessorTime - cpuBefore).TotalMilliseconds;
+            TestContext.Progress.WriteLine($"{name} ({mode}): {frames} frames in {stopwatch.ElapsedMilliseconds} ms, "
+                                           + $"{cpu:0} ms CPU ({cpu / Math.Max(frames, 1):0.00} ms per frame)");
+        }
+
+        private MediaFoundationVideoDecoder createDecoder(string name, HardwareVideoDecoder mode)
+        {
+            var decoder = new MediaFoundationVideoDecoder(renderer, openVideo(name));
+            decoder.TargetHardwareVideoDecoders.Value = mode;
+            return decoder;
         }
 
         private (double time, byte[][] planes) decodeFirstFrame(VideoDecoder decoder)

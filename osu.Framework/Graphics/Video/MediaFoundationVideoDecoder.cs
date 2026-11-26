@@ -23,7 +23,9 @@ namespace osu.Framework.Graphics.Video
     /// (see <c>native/WindowsFfmpegExclusion.targets</c>), so such videos do not play there.
     /// </summary>
     /// <remarks>
-    /// Media Foundation's software decoders are used; frames are converted from NV12 to the I420 planes video textures expect.
+    /// Unless <see cref="VideoDecoder.TargetHardwareVideoDecoders"/> is <see cref="HardwareVideoDecoder.None"/>, decoding uses DXVA on a
+    /// private D3D11 device (Media Foundation still decodes codecs the GPU lacks in software). Frames are read back and converted
+    /// from NV12 to the I420 planes video textures expect.
     /// Disabling the UseMediaFoundationVideoDecoder framework setting uses FFmpeg instead, which Windows x64 builds only ship
     /// with <c>-p:G0V0KeepWindowsFfmpeg=true</c>.
     /// </remarks>
@@ -56,6 +58,7 @@ namespace osu.Framework.Graphics.Video
         private DecoderInfo info;
         private bool disposeStarted;
         private bool disposed;
+        private bool loggedDecoding;
         private volatile DecoderState state = DecoderState.Ready;
         private volatile float lastDecodedFrameTime;
         private double? skipOutputUntilTime;
@@ -164,7 +167,8 @@ namespace osu.Framework.Graphics.Video
                 throw new NotSupportedException("The stream cannot seek.");
 
             stream.Position = 0;
-            int result = g0_vdec_open(&readStream, GCHandle.ToIntPtr(handle), stream.Length, out decoder, out info);
+            bool hardware = TargetHardwareVideoDecoders.Value != HardwareVideoDecoder.None;
+            int result = g0_vdec_open(&readStream, GCHandle.ToIntPtr(handle), stream.Length, hardware ? 1 : 0, out decoder, out info);
             if (result < 0)
             {
                 decoder = IntPtr.Zero;
@@ -251,6 +255,12 @@ namespace osu.Framework.Graphics.Video
             }
 
             state = DecoderState.Running;
+
+            if (!loggedDecoding)
+            {
+                loggedDecoding = true;
+                Logger.Log($"Media Foundation decodes this video {(info.Hardware != 0 ? "on the GPU (DXVA)" : "in software")}");
+            }
 
             // A format change reported with this frame can shrink it within the buffer; the buffer is replaced when it comes back.
             width = info.Width;
@@ -387,10 +397,12 @@ namespace osu.Framework.Graphics.Video
             public long Duration;
             public int Matrix;
             public int CanSeek;
+            public int Hardware;
         }
 
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int g0_vdec_open(delegate* unmanaged[Cdecl]<IntPtr, long, byte*, int, int> read, IntPtr context, long length, out IntPtr decoder, out DecoderInfo info);
+        private static extern int g0_vdec_open(delegate* unmanaged[Cdecl]<IntPtr, long, byte*, int, int> read, IntPtr context, long length, int hardware, out IntPtr decoder,
+                                               out DecoderInfo info);
 
         [DllImport("g0v0-gpu-video", CallingConvention = CallingConvention.Cdecl)]
         private static extern int g0_vdec_read(IntPtr decoder, IntPtr y, IntPtr u, IntPtr v, int capacityWidth, int capacityHeight, out long time, ref DecoderInfo info);
