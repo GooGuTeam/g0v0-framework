@@ -24,7 +24,7 @@ Android builds are linked for 16 KB pages, which Android 16 requires.
 
 iOS loads the library as an embedded framework. CI builds `g0v0-image-codecs.framework` for devices and Apple silicon simulators (both arm64) and combines them into `artifacts/ios/image-codecs/g0v0-image-codecs.xcframework`. `osu.Framework.iOS` resolves it at `@rpath/g0v0-image-codecs.framework`, and source iOS builds embed it when it is present there.
 
-The `g0v0.Framework` package carries the library under `runtimes/<rid>/native/` for win-x64, win-arm64, linux-x64, linux-arm64, osx-x64, osx-arm64 and android-arm64, and as `runtimes/ios/native/g0v0-image-codecs.xcframework`, with the third-party licences under `licences/`. The Android library also stops NuGet from falling back to the glibc linux-arm64 one, which the Android RID graph would otherwise select. `.github/workflows/build-image-codecs.yml` builds each platform on its own runner; the release workflow downloads them to `artifacts/<rid>/image-codecs/` (`artifacts/ios/image-codecs/` for iOS) and packs with `-p:PackImageCodecs=true -p:BuildImageCodecs=false`, then checks the package with `verify-image-codecs-package.py`. Packing without `PackImageCodecs` fails, so a package never ships without the decoder.
+The `g0v0.Framework` package carries the library under `runtimes/<rid>/native/` for win-x64, win-arm64, linux-x64, linux-arm64, osx-x64, osx-arm64 and android-arm64, and as `runtimes/ios/native/g0v0-image-codecs.xcframework`, with the third-party licences under `licences/`. The Android library also stops NuGet from falling back to the glibc linux-arm64 one, which the Android RID graph would otherwise select. The image codec jobs in `.github/workflows/build-native.yml` build each platform on its own runner; the release workflow downloads them to `artifacts/<rid>/image-codecs/` (`artifacts/ios/image-codecs/` for iOS) and packs with `-p:PackImageCodecs=true -p:BuildImageCodecs=false`, then checks the package with `verify-image-codecs-package.py`. Packing without `PackImageCodecs` fails, so a package never ships without the decoder.
 
 Releases also publish `g0v0.Framework.Android` and `g0v0.Framework.iOS` at the same version. They are packed on Windows and on the Xcode runner, since each needs its platform workload. Other Android ABIs and Intel simulators have no image codec library.
 
@@ -59,7 +59,7 @@ Do not publish packages using temporary local framework/Veldrid references. The 
 
 ### CI/CD
 
-`build-recording-native.yml` is a reusable build-only workflow on Windows 2022. It caches the pinned toolchain, compiles both DLLs, inspects an isolated NuGet packaging artifact and uploads DLLs with checksums. It is called by framework CI and release. Existing managed test jobs are unchanged; no native probe job is added.
+The `recording` job in `.github/workflows/build-native.yml` (the reusable native workflow, beside the image codec jobs) runs on Windows 2022. It caches the pinned toolchain, compiles both DLLs, inspects an isolated NuGet packaging artifact and uploads DLLs with checksums. It is called by framework CI and release. Existing managed test jobs are unchanged; no native probe job is added.
 
 The release job waits for native compilation, downloads and verifies hashes on Linux, packs native assets into the framework package and verifies package entries/hashes/PE architecture before the existing publication steps. The inspection script never loads native code. No publication has been triggered locally.
 

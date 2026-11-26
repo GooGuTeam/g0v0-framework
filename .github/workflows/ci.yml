@@ -7,8 +7,8 @@ permissions:
   security-events: write # for reporting InspectCode issues
 
 jobs:
-  recording-native:
-    uses: ./.github/workflows/build-recording-native.yml
+  native:
+    uses: ./.github/workflows/build-native.yml
     permissions:
       contents: read
 

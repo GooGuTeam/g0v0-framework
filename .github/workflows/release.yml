@@ -15,13 +15,8 @@ env:
   DOTNET_VERSION: '10.0.x'
 
 jobs:
-  recording-native:
-    uses: ./.github/workflows/build-recording-native.yml
-    permissions:
-      contents: read
-
-  image-codecs:
-    uses: ./.github/workflows/build-image-codecs.yml
+  native:
+    uses: ./.github/workflows/build-native.yml
     permissions:
       contents: read
 
@@ -57,7 +52,7 @@ jobs:
   # published together with the framework by the nuget job. The framework project they reference needs the image codecs of the build machine.
   android:
     name: Pack Android
-    needs: [version, image-codecs]
+    needs: [version, native]
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -105,7 +100,7 @@ jobs:
 
   ios:
     name: Pack iOS
-    needs: [version, image-codecs]
+    needs: [version, native]
     runs-on: xcode-27
     steps:
       - name: Checkout
@@ -157,7 +152,7 @@ jobs:
 
   nuget:
     name: Pack & Publish NuGet
-    needs: [version, recording-native, image-codecs, android, ios]
+    needs: [version, native, android, ios]
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -1,4 +1,6 @@
-name: Build image codec libraries
+# Native libraries shipped in the g0v0.Framework package: the image codec library for every platform, and the
+# Windows x64 recording libraries. Called by CI and release; the release job downloads the uploaded artifacts by name.
+name: Build native libraries
 
 on:
   workflow_call:
@@ -8,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  native:
-    name: ${{ matrix.rid }}
+  image-codecs:
+    name: image-codecs (${{ matrix.rid }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -44,8 +46,8 @@ jobs:
           path: native/artifacts/${{ matrix.rid }}/image-codecs
           if-no-files-found: error
 
-  android:
-    name: android-arm64
+  image-codecs-android:
+    name: image-codecs (android-arm64)
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
@@ -71,8 +73,8 @@ jobs:
           path: native/artifacts/android-arm64/image-codecs
           if-no-files-found: error
 
-  ios:
-    name: ios
+  image-codecs-ios:
+    name: image-codecs (ios)
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -104,4 +106,53 @@ jobs:
         with:
           name: image-codecs-ios
           path: native/artifacts/ios/image-codecs
+          if-no-files-found: error
+
+  recording:
+    name: recording (win-x64)
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Cache pinned toolchain
+        uses: actions/cache@v5
+        with:
+          path: native/.toolchain
+          key: recording-native-win-x64-${{ hashFiles('native/recording-toolchain.json') }}
+      - name: Compile libraries only
+        shell: pwsh
+        run: ./native/build-recording.ps1 -DownloadToolchain
+      - name: Assemble native packaging inspection artifact
+        shell: pwsh
+        run: |
+          $project = @'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net10.0</TargetFramework>
+              <PackageId>Recording.Native.Packaging.Check</PackageId>
+              <EnableDefaultItems>false</EnableDefaultItems>
+              <PackRecordingNative>true</PackRecordingNative>
+              <NoPackageAnalysis>true</NoPackageAnalysis>
+            </PropertyGroup>
+            <Import Project="../RecordingNative.targets" />
+          </Project>
+          '@
+          New-Item -ItemType Directory -Force native/artifacts/package-check | Out-Null
+          Set-Content native/artifacts/Packaging.csproj $project -Encoding utf8
+          dotnet pack native/artifacts/Packaging.csproj -c Release -o native/artifacts/package-check
+          if ($LASTEXITCODE -ne 0) { throw 'Native packaging failed.' }
+          $package = (Get-ChildItem native/artifacts/package-check/*.nupkg).FullName
+          python native/verify-recording-package.py $package native/artifacts/win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Native package inspection failed.' }
+      - name: Upload libraries and checksums
+        uses: actions/upload-artifact@v7
+        with:
+          name: recording-native-win-x64
+          path: |
+            native/artifacts/win-x64/*.dll
+            native/artifacts/win-x64/SHA256SUMS
           if-no-files-found: error
