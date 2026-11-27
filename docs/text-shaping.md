@@ -19,14 +19,22 @@ that can substitute glyphs from another font. A run that fails to shape at all
 (no native library, unreadable font data) is also retried per character, and
 shaping is then disabled for that font rather than retried on every frame.
 
+A font registered in a store nested inside the one the text is drawn from is
+shaped by that store, the same way per-character lookups already find it. Without
+that, text using such a font would be laid out one character at a time even
+though the mode says otherwise.
+
 Glyphs are fetched by index (`Font/<name>/#<id>` texture names) instead of by
 character, at the same resolution tier the character path would use.
 
 Text is normalised to Unicode form C before layout, once per text change, so
-decomposed and precomposed spellings of the same text are laid out identically
-and compare equal in application code. Normalisation also runs before word
-splitting, because the splitter breaks after CJK characters and would otherwise
-separate a kana from its voiced sound mark.
+decomposed and precomposed spellings of the same text are laid out identically.
+The normalised string is a layout copy: `SpriteText.Text` and the strings an
+application holds keep the form they were given, so two spellings that draw the
+same still compare unequal unless the application normalises them itself.
+
+Normalisation also runs before word splitting, because the splitter breaks after
+CJK characters and would otherwise separate a kana from its voiced sound mark.
 
 ## Clusters
 
@@ -38,7 +46,29 @@ character removes its whole cluster, and truncation only cuts between clusters.
 
 Truncation decides where to cut before laying anything out, and shapes the
 surviving prefix on its own, so the last kept character is not left in the form
-and spacing it had while the cut-away text still followed it.
+and spacing it had while the cut-away text still followed it. That prefix is
+measured again afterwards: shaping it alone drops the kerning its last glyph had
+against the text that was cut away, which widens it, so a cut that only just
+fitted in the full run may have to move back.
+
+When none of the new text fits, what is already laid out is cut back until the
+ellipsis fits, and an ellipsis too wide even for an empty line is drawn past the
+limit rather than dropped.
+
+## Scripts
+
+A run is shaped once per script. HarfBuzz applies one script's rules to a whole
+buffer and guesses the script from the first character that has one, so text
+that mixes scripts would otherwise be shaped entirely by the rules of its first
+script - a Devanagari syllable after a Latin word would never form its conjuncts,
+and the result is not a missing glyph that the fallback would notice, just text
+that looks wrong.
+
+Characters that belong to no script of their own - spaces, punctuation, digits,
+combining marks - stay with the script around them and never start a run, so a
+mark is never separated from the base it attaches to. The CJK scripts share one
+run because they are mixed freely within one language and HarfBuzz treats them
+alike.
 
 ## Direction
 
@@ -68,7 +98,9 @@ because the end of the text is only the end of the run in that direction.
 `osu.Framework.Tests/Text/ShapedTextBuilderTest.cs` shapes a real font from
 memory, which also fails the test matrix when a platform's native HarfBuzz asset
 is missing: the library is resolved on first use, so a packaging mistake would
-otherwise only show up on a player's machine.
+otherwise only show up on a player's machine. `ScriptRunsTest` covers where a run
+is split and `BidirectionalTextTest` the order the runs are placed in; neither
+needs a font, so they run on every platform.
 
 Native assets come from the `HarfBuzzSharp.NativeAssets.*` packages. The managed
 package carries Win32 and macOS; Linux is added by `osu.Framework.csproj`, and
