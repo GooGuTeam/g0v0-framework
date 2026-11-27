@@ -258,6 +258,8 @@ namespace osu.Framework.IO.Stores
                 {
                     ShapedGlyph glyph = shaped[i];
 
+                    // The name is qualified with the font's own name, which is also the prefix this store's glyphs are
+                    // stored under, so it resolves back to this store.
                     var texture = Get(shaper.GetTextureName(glyph.GlyphId, tier));
 
                     if (texture == null)
@@ -275,6 +277,14 @@ namespace osu.Framework.IO.Stores
 
                 glyphs = result;
                 return true;
+            }
+
+            // A font can live in a nested store, which per-character lookups already search; shaping has to reach the
+            // same fonts, or text drawn from one would silently be laid out one character at a time.
+            foreach (var store in nestedFontStores)
+            {
+                if (store.TryShape(fontName, text, fontSize, clusterOffset, out glyphs))
+                    return true;
             }
 
             return false;

@@ -79,13 +79,18 @@ namespace osu.Framework.Text
         {
             // Truncation keeps the start of the text and drops the end, which is only where the run ends when it reads
             // left to right. Right-to-left text keeps the per-glyph path, which does not need to know where it ends.
-            if (addingEllipsis || font.FixedWidth || string.IsNullOrEmpty(text) || !store.SupportsShaping() || BidirectionalText.ContainsRightToLeft(text))
+            if (addingEllipsis || !CanAddCharacters || font.FixedWidth || string.IsNullOrEmpty(text) || !store.SupportsShaping() || BidirectionalText.ContainsRightToLeft(text))
                 return false;
 
-            if (!TryShapeText(text, 0, out var glyphs))
+            // Cluster numbers continue after the glyphs already laid out. Numbering each append from zero would make
+            // a cluster of this append indistinguishable from one of an earlier append once the text is cut back to
+            // make room for the ellipsis, and removing it would then take the earlier text with it.
+            int clusterBase = Characters.Count;
+
+            if (!TryShapeText(text, clusterBase, out var glyphs))
                 return false;
 
-            if (glyphs.Count == 0 || glyphs[0].ClusterStart != 0)
+            if (glyphs.Count == 0 || glyphs[0].ClusterStart != clusterBase)
                 return false;
 
             if (HasAvailableSpace(MeasureShapedRun(glyphs, glyphs.Count)))
@@ -95,17 +100,64 @@ namespace osu.Framework.Text
             }
 
             bool hasEllipsis = !string.IsNullOrEmpty(ellipsisString);
-            int cut = findCut(glyphs, hasEllipsis ? measureEllipsis() + spacing.X : 0);
 
-            // Trailing whitespace would push the ellipsis away from the text it is meant to follow.
-            while (cut > 0 && char.IsWhiteSpace(text[cut - 1]))
-                cut--;
+            // Space to keep free for the ellipsis, including the spacing that separates it from the text before it.
+            // No kerning is involved: shaped glyphs carry none, and the ellipsis is separated from the prefix by
+            // shaping rather than by a pair lookup.
+            float reserved = hasEllipsis ? measureEllipsis() + spacing.X : 0;
 
-            IReadOnlyList<ShapedCharacterGlyph>? prefix = null;
+            // A cluster boundary that fits in the full run does not guarantee that the prefix ending there still fits:
+            // shaping the prefix on its own drops the kerning its last glyph had against the text that was cut away,
+            // which widens it. So the longest candidate is tried first and shorter ones are tried after it.
+            var cuts = findCuts(glyphs, clusterBase, reserved);
 
-            if (cut > 0 && !TryShapeText(text.Substring(0, cut), 0, out prefix))
-                return false;
+            for (int i = cuts.Count - 1; i >= 0; i--)
+            {
+                int cut = trimTrailingWhitespace(text, cuts[i]);
 
+                if (cut == 0)
+                    continue;
+
+                if (!TryShapeText(text.Substring(0, cut), clusterBase, out var prefix))
+                    return false;
+
+                if (!HasAvailableSpace(MeasureShapedRun(prefix, prefix.Count) + reserved))
+                    continue;
+
+                addPrefixAndEllipsis(prefix, hasEllipsis);
+                return true;
+            }
+
+            // Nothing of the new text fits. The ellipsis still has to be drawn within the available width, so what is
+            // already laid out is cut back until there is room for it, as OnWidthExceeded does.
+            if (hasEllipsis)
+            {
+                while (Characters.Count > 0)
+                {
+                    RemoveLastCharacter();
+
+                    if (Characters.Count == 0)
+                        break;
+
+                    if (Characters[^1].IsWhiteSpace())
+                        continue;
+
+                    if (base.HasAvailableSpace(reserved))
+                        break;
+                }
+            }
+
+            addPrefixAndEllipsis(null, hasEllipsis);
+            return true;
+        }
+
+        /// <summary>
+        /// Adds the surviving prefix and the ellipsis, and marks the text as truncated.
+        /// </summary>
+        private void addPrefixAndEllipsis(IReadOnlyList<ShapedCharacterGlyph>? prefix, bool hasEllipsis)
+        {
+            // Width checks are suspended while the ellipsis is added: the space for it has already been reserved, and
+            // an ellipsis that does not fit even on an empty line still has to be drawn rather than dropped.
             addingEllipsis = true;
 
             try
@@ -121,8 +173,20 @@ namespace osu.Framework.Text
                 addingEllipsis = false;
                 IsTruncated = true;
             }
+        }
 
-            return true;
+        /// <summary>
+        /// Moves <paramref name="cut"/> back over the whitespace that ends the kept prefix.
+        /// </summary>
+        /// <remarks>
+        /// Trailing whitespace would push the ellipsis away from the text it is meant to follow.
+        /// </remarks>
+        private static int trimTrailingWhitespace(string text, int cut)
+        {
+            while (cut > 0 && char.IsWhiteSpace(text[cut - 1]))
+                cut--;
+
+            return cut;
         }
 
         /// <summary>
@@ -137,27 +201,37 @@ namespace osu.Framework.Text
         }
 
         /// <summary>
-        /// Finds the number of characters from the start of <paramref name="glyphs"/> that fit, leaving
-        /// <paramref name="reserved"/> free for whatever follows.
+        /// The number of characters that fit, one entry per cluster boundary, in increasing order.
         /// </summary>
-        private int findCut(IReadOnlyList<ShapedCharacterGlyph> glyphs, float reserved)
+        /// <param name="glyphs">The shaped run, shaped as a whole.</param>
+        /// <param name="clusterBase">The cluster number given to the first character of the run.</param>
+        /// <param name="reserved">Space to leave free for whatever follows the run.</param>
+        private List<int> findCuts(IReadOnlyList<ShapedCharacterGlyph> glyphs, int clusterBase, float reserved)
         {
-            int cut = 0;
+            var cuts = new List<int>();
+            float width = 0;
 
             for (int i = 0; i < glyphs.Count; i++)
             {
+                // Accumulating the advances as the run is walked keeps this linear in its length, rather than
+                // re-measuring every candidate prefix.
+                if (i > 0 || !CurrentLineIsEmpty)
+                    width += spacing.X;
+
+                width += glyphs[i].Glyph.XAdvance * font.Size;
+
                 // Only cut between clusters: a base character without the marks shaped onto it, or half a ligature,
                 // is not something that can be drawn.
                 if (i + 1 < glyphs.Count && glyphs[i + 1].ClusterStart == glyphs[i].ClusterStart)
                     continue;
 
-                if (!HasAvailableSpace(MeasureShapedRun(glyphs, i + 1) + reserved))
+                if (!HasAvailableSpace(width + reserved))
                     break;
 
-                cut = glyphs[i].ClusterEnd;
+                cuts.Add(glyphs[i].ClusterEnd - clusterBase);
             }
 
-            return cut;
+            return cuts;
         }
 
         protected override bool CanAddCharacters => (base.CanAddCharacters && !IsTruncated) || addingEllipsis;

@@ -38,7 +38,11 @@ namespace osu.Framework.Text
         private Vector2 currentPos;
         private float currentLineHeight;
         private float? currentLineBase;
-        private bool currentNewLine = true;
+
+        /// <summary>
+        /// Whether nothing has been added to the current line yet, so that the next glyph carries no spacing before it.
+        /// </summary>
+        private protected bool CurrentLineIsEmpty { get; private set; } = true;
 
         /// <summary>
         /// Gets the current base height of the text in this <see cref="TextBuilder"/>.
@@ -99,7 +103,7 @@ namespace osu.Framework.Text
             currentPos = startOffset;
             currentLineBase = null;
             currentLineHeight = 0;
-            currentNewLine = true;
+            CurrentLineIsEmpty = true;
         }
 
         /// <summary>
@@ -135,9 +139,14 @@ namespace osu.Framework.Text
 
             var runs = BidirectionalText.GetRuns(text);
 
+            // Cluster numbers continue after the glyphs already laid out, so that a cluster of this append is never
+            // mistaken for one of an earlier append when the text is removed again. The count is a valid base because
+            // a cluster always starts at or before the glyph that carries it, and glyph indices only ever grow.
+            int clusterBase = Characters.Count;
+
             if (runs.Count == 1 && runs[0].Start == 0 && runs[0].Length == text.Length)
             {
-                if (!TryShapeText(text, 0, out var glyphs))
+                if (!TryShapeText(text, clusterBase, out var glyphs))
                     return false;
 
                 AddShapedGlyphs(glyphs);
@@ -150,7 +159,7 @@ namespace osu.Framework.Text
 
             foreach (var run in runs)
             {
-                if (!TryShapeText(text.Substring(run.Start, run.Length), run.Start, out var glyphs))
+                if (!TryShapeText(text.Substring(run.Start, run.Length), clusterBase + run.Start, out var glyphs))
                     return false;
 
                 shapedRuns.Add(glyphs);
@@ -172,8 +181,8 @@ namespace osu.Framework.Text
         /// </summary>
         /// <param name="text">The text to shape.</param>
         /// <param name="clusterOffset">
-        /// The position of <paramref name="text"/> within the line, added to every reported cluster so that a line made
-        /// of several runs keeps one character numbering.
+        /// The number given to the first character of <paramref name="text"/>; every reported cluster is offset by it,
+        /// so that a run keeps a numbering that is unique within the builder rather than within itself.
         /// </param>
         /// <param name="glyphs">The shaped glyphs, each with the characters it covers.</param>
         /// <returns><see langword="false"/> if shaping is unavailable or the run could not be shaped.</returns>
@@ -182,6 +191,9 @@ namespace osu.Framework.Text
                || store.TryShape(font.FontNameNoFamily, text, font.Size, clusterOffset, out glyphs)
                || store.TryShape(string.Empty, text, font.Size, clusterOffset, out glyphs);
 
+        /// <summary>
+        /// Whether nothing has been added to the current line yet, so that the next glyph carries no spacing before it.
+        /// </summary>
         /// <summary>
         /// The width the first <paramref name="count"/> glyphs of a shaped run occupy when added at the current
         /// position, including the spacing between them.
@@ -192,7 +204,7 @@ namespace osu.Framework.Text
 
             for (int i = 0; i < count; i++)
             {
-                if (i > 0 || !currentNewLine)
+                if (i > 0 || !CurrentLineIsEmpty)
                     width += spacing.X;
 
                 width += glyphs[i].Glyph.XAdvance * font.Size;
@@ -252,7 +264,7 @@ namespace osu.Framework.Text
             float kerning = 0;
 
             // Spacing + kerning are only applied if the current line is not empty
-            if (!currentNewLine)
+            if (!CurrentLineIsEmpty)
             {
                 if (Characters.Count > 0)
                     kerning = glyph.GetKerning(Characters[^1].Glyph);
@@ -273,7 +285,7 @@ namespace osu.Framework.Text
 
             glyph.DrawRectangle = new RectangleF(new Vector2(currentPos.X + glyph.XOffset, currentPos.Y + glyph.YOffset), new Vector2(glyph.Width, glyph.Height));
             glyph.LinePosition = currentPos.Y;
-            glyph.OnNewLine = currentNewLine;
+            glyph.OnNewLine = CurrentLineIsEmpty;
 
             if (!glyph.IsWhiteSpace())
             {
@@ -304,7 +316,7 @@ namespace osu.Framework.Text
             Characters.Add(glyph);
 
             currentPos.X += glyph.XAdvance;
-            currentNewLine = false;
+            CurrentLineIsEmpty = false;
 
             Bounds = Vector2.ComponentMax(Bounds, currentPos + new Vector2(0, currentLineHeight));
             return true;
@@ -318,7 +330,7 @@ namespace osu.Framework.Text
         /// </remarks>
         public void AddNewLine()
         {
-            if (currentNewLine)
+            if (CurrentLineIsEmpty)
                 currentLineHeight = font.Size;
 
             // Reset + vertically offset the current position
@@ -327,7 +339,7 @@ namespace osu.Framework.Text
 
             currentLineBase = null;
             currentLineHeight = 0;
-            currentNewLine = true;
+            CurrentLineIsEmpty = true;
         }
 
         /// <summary>
@@ -442,7 +454,7 @@ namespace osu.Framework.Text
             // The new line is removed when the first character on the line is removed, thus the current position is never on a new line
             // after a character is removed except when there are no characters remaining in the builder
             if (Characters.Count == 0)
-                currentNewLine = true;
+                CurrentLineIsEmpty = true;
         }
 
         /// <summary>

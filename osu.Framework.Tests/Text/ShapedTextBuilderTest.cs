@@ -5,6 +5,7 @@ using System.Linq;
 using NUnit.Framework;
 using osu.Framework.Graphics.Rendering.Dummy;
 using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.Textures;
 using osu.Framework.IO.Stores;
 using osu.Framework.Text;
 
@@ -248,6 +249,94 @@ namespace osu.Framework.Tests.Text
 
             Assert.That(truncating.IsTruncated, Is.False);
             Assert.That(truncating.Characters, Has.Count.EqualTo(3));
+        }
+
+        /// <summary>
+        /// Cluster numbers have to be unique within the builder, not within one append: text added in pieces shares
+        /// the builder with the pieces before it, and removing one glyph must not reach back into an earlier piece.
+        /// </summary>
+        [Test]
+        public void TestRemoveLastCharacterDoesNotReachIntoAnEarlierAppend()
+        {
+            using var store = createStore(TextShapingMode.HarfBuzz);
+            var builder = new TextBuilder(store, font);
+
+            builder.AddText("a");
+            builder.AddText("b");
+
+            Assert.That(builder.Characters, Has.Count.EqualTo(2));
+
+            builder.RemoveLastCharacter();
+
+            Assert.That(builder.Characters.Select(c => c.Character), Is.EqualTo("a"), "Only the character of the last append may be removed.");
+        }
+
+        /// <summary>
+        /// Text that overflows the space already filled has nowhere to put an ellipsis, so what is already laid out
+        /// has to be cut back first. Otherwise the ellipsis is drawn past the width the caller asked for.
+        /// </summary>
+        [Test]
+        public void TestTruncationMakesRoomForTheEllipsis()
+        {
+            using var store = createStore(TextShapingMode.HarfBuzz);
+
+            var measure = new TextBuilder(store, font);
+            measure.AddText("abc");
+            float maxWidth = measure.Bounds.X;
+
+            var truncating = new TruncatingTextBuilder(store, font, maxWidth, "...");
+            truncating.AddText("abc");
+            truncating.AddText("def");
+
+            Assert.That(truncating.IsTruncated, Is.True);
+            Assert.That(truncating.Characters[^1].Character, Is.EqualTo('.'), "The ellipsis must still be drawn.");
+            Assert.That(truncating.Bounds.X, Is.LessThanOrEqualTo(maxWidth + 0.01f), "The ellipsis must fit within the width asked for.");
+        }
+
+        /// <summary>
+        /// The cut is chosen from widths measured in the full run, but the prefix is then shaped on its own, where its
+        /// last glyph is no longer kerned against what was cut away and is therefore wider. The surviving prefix has
+        /// to be measured again, and the cut moved back if it no longer fits.
+        /// </summary>
+        [Test]
+        public void TestTruncatedPrefixIsMeasuredAgainAfterReshaping()
+        {
+            using var store = createStore(TextShapingMode.HarfBuzz);
+
+            var full = new TextBuilder(store, font);
+            full.AddText("AVA");
+            float prefixInFullRun = full.Characters[0].XAdvance + full.Characters[1].XAdvance;
+
+            var isolated = new TextBuilder(store, font);
+            isolated.AddText("AV");
+            float prefixAlone = isolated.Bounds.X;
+
+            Assert.That(prefixAlone, Is.GreaterThan(prefixInFullRun), "The font kerns V against the character that follows it.");
+
+            // Wide enough for "AV" as it is spaced inside "AVA", too narrow for "AV" shaped on its own.
+            float maxWidth = (prefixInFullRun + prefixAlone) / 2;
+
+            var truncating = new TruncatingTextBuilder(store, font, maxWidth);
+            truncating.AddText("AVA");
+
+            Assert.That(truncating.Characters.Select(c => c.Character), Is.EqualTo("A"), "The cut must move back to a prefix that still fits.");
+            Assert.That(truncating.Bounds.X, Is.LessThanOrEqualTo(maxWidth + 0.01f));
+        }
+
+        /// <summary>
+        /// A font can be registered in a store nested inside the one text is drawn from. Shaping has to reach it the
+        /// same way the per-character path does, or the text silently falls back to per-character layout.
+        /// </summary>
+        [Test]
+        public void TestNestedStoreIsShaped()
+        {
+            using var outer = new FontStore(new DummyRenderer { ShapingMode = TextShapingMode.HarfBuzz }, new ResourceStore<TextureUpload>(), scaleAdjust: 100);
+            outer.AddStore(createStore(TextShapingMode.HarfBuzz));
+
+            var builder = new TextBuilder(outer, font);
+            builder.AddText("e\u0301");
+
+            Assert.That(builder.Characters, Has.Count.EqualTo(1), "The nested store must be asked to shape before falling back.");
         }
 
         /// <summary>
