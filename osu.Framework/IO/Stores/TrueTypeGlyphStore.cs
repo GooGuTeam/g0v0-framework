@@ -288,10 +288,44 @@ namespace osu.Framework.IO.Stores
 
         private bool tryShapeRun(HarfBuzzSharp.Font font, string text, out IReadOnlyList<ShapedGlyph> glyphs)
         {
+            // One buffer carries one script: HarfBuzz guesses it from the first character that has one and then applies
+            // that script's rules to the whole buffer, so text that mixes scripts has to be shaped once per script.
+            var boundaries = ScriptRuns.GetBoundaries(text);
+
+            if (boundaries.Count == 2)
+                return tryShapeSegment(font, text, 0, text.Length, out glyphs);
+
+            var all = new List<ShapedGlyph>(text.Length);
+
+            for (int i = 0; i + 1 < boundaries.Count; i++)
+            {
+                int start = boundaries[i];
+
+                if (!tryShapeSegment(font, text, start, boundaries[i + 1] - start, out var segment))
+                {
+                    glyphs = Array.Empty<ShapedGlyph>();
+                    return false;
+                }
+
+                all.AddRange(segment);
+            }
+
+            glyphs = all;
+            return true;
+        }
+
+        /// <summary>
+        /// Shapes the <paramref name="length"/> characters of <paramref name="text"/> starting at <paramref name="start"/>,
+        /// which must all belong to one script and read in one direction.
+        /// </summary>
+        private bool tryShapeSegment(HarfBuzzSharp.Font font, string text, int start, int length, out IReadOnlyList<ShapedGlyph> glyphs)
+        {
             glyphs = Array.Empty<ShapedGlyph>();
 
+            string segment = length == text.Length ? text : text.Substring(start, length);
+
             using var buffer = new HarfBuzzSharp.Buffer();
-            buffer.AddUtf16(text);
+            buffer.AddUtf16(segment);
             buffer.GuessSegmentProperties();
             font.Shape(buffer);
 
@@ -308,7 +342,7 @@ namespace osu.Framework.IO.Stores
             // HarfBuzz reports the offset each cluster starts at, not its length. Clusters tile the text in logical
             // order, so a cluster ends where the next one begins, whatever order the glyphs were returned in.
             for (int i = 0; i < infos.Length; i++)
-                clusters[i] = Math.Clamp((int)infos[i].Cluster, 0, text.Length - 1);
+                clusters[i] = Math.Clamp((int)infos[i].Cluster, 0, segment.Length - 1);
 
             int[] orderedClusters = (int[])clusters.Clone();
             Array.Sort(orderedClusters);
@@ -318,7 +352,7 @@ namespace osu.Framework.IO.Stores
                 if (i + 1 < orderedClusters.Length && orderedClusters[i] == orderedClusters[i + 1])
                     continue;
 
-                int nextCluster = i + 1 < orderedClusters.Length ? orderedClusters[i + 1] : text.Length;
+                int nextCluster = i + 1 < orderedClusters.Length ? orderedClusters[i + 1] : segment.Length;
                 clusterLengths[orderedClusters[i]] = nextCluster - orderedClusters[i];
             }
 
@@ -341,8 +375,9 @@ namespace osu.Framework.IO.Stores
 
                     shaped[i] = new ShapedGlyph(
                         glyphId,
-                        text[clusters[i]],
-                        clusters[i],
+                        segment[clusters[i]],
+                        // Reported against the whole text, so that a line made of several scripts keeps one numbering.
+                        start + clusters[i],
                         clusterLengths[clusters[i]],
                         positions[i].XAdvance * unitScale,
                         slot->bitmap_left + positions[i].XOffset * unitScale,
