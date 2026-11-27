@@ -79,11 +79,14 @@ namespace osu.Framework.Text
             bool paragraphRightToLeft = paragraphIsRightToLeft(text);
 
             int runStart = 0;
+            int position = 0;
             bool? runRightToLeft = null;
 
-            for (int i = 0; i < text.Length;)
+            // Enumerating runes rather than reading them one at a time is what makes an unpaired surrogate safe: it
+            // is reported as U+FFFD instead of throwing, which is also what the per-character path draws for it.
+            foreach (Rune rune in text.EnumerateRunes())
             {
-                Rune rune = Rune.GetRuneAt(text, i);
+                int i = position;
 
                 // A character with no direction of its own reads in the direction of the text before it, or of the
                 // paragraph when nothing precedes it.
@@ -101,7 +104,7 @@ namespace osu.Framework.Text
                     runStart = i;
                 }
 
-                i += rune.Utf16SequenceLength;
+                position += rune.Utf16SequenceLength;
             }
 
             runs.Add(new TextRun(runStart, text.Length - runStart, runRightToLeft!.Value));
@@ -145,7 +148,7 @@ namespace osu.Framework.Text
             if (Rune.IsDigit(rune))
                 return false;
 
-            if (isRightToLeft(rune.Value))
+            if (isRightToLeft(rune))
                 return true;
 
             if (Rune.IsLetter(rune))
@@ -155,17 +158,26 @@ namespace osu.Framework.Text
         }
 
         /// <summary>
-        /// Whether <paramref name="codePoint"/> has a strong right-to-left direction.
+        /// Whether <paramref name="rune"/> is a strongly right-to-left character.
         /// </summary>
         /// <remarks>
-        /// The blocks that carry one: Hebrew, Arabic and the scripts that share their direction, plus the presentation
-        /// forms. Digits are deliberately not included: they read left to right even inside right-to-left text.
+        /// <para>
+        /// The blocks that carry right-to-left scripts: Hebrew, Arabic and the scripts that share their direction, plus
+        /// the presentation forms. Cypriot is left out of the supplementary range even though it sits next to the
+        /// Aramaic-derived scripts, because it reads left to right.
+        /// </para>
+        /// <para>
+        /// Only letters count. The same blocks also hold punctuation, marks and signs whose bidi classes are weak or
+        /// neutral: U+060C ARABIC COMMA is a separator, so on its own it must not decide the direction of a
+        /// paragraph, and a combining mark has no direction of its own at all. Digits are excluded for the same
+        /// reason as everywhere else in this class: they read left to right even inside right-to-left text.
+        /// </para>
         /// </remarks>
-        private static bool isRightToLeft(int codePoint)
-            => codePoint is >= 0x0590 and <= 0x08FF
-                or >= 0xFB1D and <= 0xFDFF
-                or >= 0xFE70 and <= 0xFEFF
-                or >= 0x10800 and <= 0x10FFF
-                or >= 0x1E800 and <= 0x1EFFF;
+        private static bool isRightToLeft(Rune rune)
+            => Rune.IsLetter(rune) && rune.Value is (>= 0x0590 and <= 0x08FF)
+                or (>= 0xFB1D and <= 0xFDFF)
+                or (>= 0xFE70 and <= 0xFEFF)
+                or (>= 0x10840 and <= 0x10FFF)
+                or (>= 0x1E800 and <= 0x1EFFF);
     }
 }

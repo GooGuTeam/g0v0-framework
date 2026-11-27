@@ -104,5 +104,47 @@ namespace osu.Framework.Tests.Text
         {
             Assert.That(BidirectionalText.GetRuns(string.Empty), Is.Empty);
         }
+
+        /// <summary>
+        /// Sitting inside a right-to-left block does not make a character strong: the Arabic comma is a separator, so
+        /// it must not decide the direction of the paragraph around it.
+        /// </summary>
+        [Test]
+        public void TestNeutralCharacterInRightToLeftBlockDoesNotSetDirection()
+        {
+            var runs = BidirectionalText.GetRuns("\u060Cabc");
+
+            Assert.That(runs, Has.Count.EqualTo(1));
+            Assert.That(runs[0].RightToLeft, Is.False, "The first strong character is Latin, so the paragraph reads left to right.");
+            Assert.That(BidirectionalText.ContainsRightToLeft("\u060C"), Is.False);
+        }
+
+        /// <summary>
+        /// A combining mark has no direction of its own, whatever script it is written for.
+        /// </summary>
+        [Test]
+        public void TestMarkIsNotStrong()
+        {
+            Assert.That(BidirectionalText.ContainsRightToLeft("a\u05B0b"), Is.False);
+        }
+
+        /// <summary>
+        /// An unpaired surrogate is not a rune, and asking for one throws. Layout must not fail on text that the
+        /// per-character path draws as a replacement glyph, and a valid surrogate pair must still count twice.
+        /// </summary>
+        [Test]
+        public void TestSurrogatesAreLaidOut()
+        {
+            var unpaired = BidirectionalText.GetRuns("a\uD800b");
+
+            Assert.That(unpaired, Has.Count.EqualTo(1));
+            Assert.That(unpaired[0].Start, Is.EqualTo(0));
+            Assert.That(unpaired[0].Length, Is.EqualTo(3));
+
+            var pair = BidirectionalText.GetRuns("a\uD83D\uDE00b");
+
+            Assert.That(pair, Has.Count.EqualTo(1));
+            Assert.That(pair[0].Length, Is.EqualTo(4), "A valid surrogate pair still occupies two code units.");
+        }
     }
 }
